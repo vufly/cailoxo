@@ -1,4 +1,5 @@
 mod nu;
+mod pwsh;
 mod shared;
 mod zsh;
 
@@ -21,5 +22,9 @@ impl<'a> Generator<'a> {
 
     pub fn nu(&self) -> Result<String> {
         nu::generate(self.config)
+    }
+
+    pub fn pwsh(&self) -> Result<String> {
+        pwsh::generate(self.config)
     }
 }

@@ -36,6 +36,7 @@ enum Command {
 enum Shell {
     Zsh,
     Nu,
+    Pwsh,
 }
 
 fn main() -> Result<()> {
@@ -56,6 +57,7 @@ fn main() -> Result<()> {
             let script = match shell {
                 Shell::Zsh => Generator::new(&config).zsh(),
                 Shell::Nu => Generator::new(&config).nu(),
+                Shell::Pwsh => Generator::new(&config).pwsh(),
             }?;
 
             let output = output.unwrap_or_else(|| shell.default_output());
@@ -76,6 +78,7 @@ impl Shell {
         match self {
             Shell::Zsh => PathBuf::from("output/prompt.zsh"),
             Shell::Nu => PathBuf::from("output/prompt.nu"),
+            Shell::Pwsh => PathBuf::from("output/prompt.ps1"),
         }
     }
 }

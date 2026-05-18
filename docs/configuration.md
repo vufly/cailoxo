@@ -1,18 +1,20 @@
 # Configuration
 
-`cailoxo` reads `cailoxo.toml` and generates native shell scripts. MVP supports `zsh` and Nushell.
+`cailoxo` reads `cailoxo.toml` and generates native shell scripts. MVP supports `zsh`, Nushell, and PowerShell.
 
 ## Generate
 
 ```sh
 cailoxo generate --shell zsh
 cailoxo generate --shell nu
+cailoxo generate --shell pwsh
 ```
 
 Default outputs:
 
 - `output/prompt.zsh`
 - `output/prompt.nu`
+- `output/prompt.ps1`
 
 Use `--output` to write somewhere else.
 
@@ -26,6 +28,10 @@ source ~/.config/cailoxo/prompt.zsh
 source ~/.config/cailoxo/prompt.nu
 ```
 
+```powershell
+. ~/.config/cailoxo/prompt.ps1
+```
+
 Quick interactive tests:
 
 ```sh
@@ -34,6 +40,10 @@ cargo run -- generate --shell zsh; tmp=$(mktemp -d); printf 'source %q/output/pr
 
 ```sh
 cargo run -- generate --shell nu; nu --no-config-file --execute 'source output/prompt.nu'
+```
+
+```sh
+cargo run -- generate --shell pwsh; pwsh -NoLogo -NoProfile -Command '. ./output/prompt.ps1; prompt'
 ```
 
 ## Structure

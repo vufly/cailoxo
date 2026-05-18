@@ -24,6 +24,7 @@ The name matches the prompt behavior: stretch when the terminal is wide, compres
 ```sh
 cailoxo generate --shell zsh
 cailoxo generate --shell nu
+cailoxo generate --shell pwsh
 ```
 
 See `docs/configuration.md` for config details.
@@ -36,6 +37,10 @@ cargo run -- generate --shell zsh; tmp=$(mktemp -d); printf 'source %q/output/pr
 
 ```sh
 cargo run -- generate --shell nu; nu --no-config-file --execute 'source output/prompt.nu'
+```
+
+```sh
+cargo run -- generate --shell pwsh; pwsh -NoLogo -NoProfile -Command '. ./output/prompt.ps1; prompt'
 ```
 
 ## Example

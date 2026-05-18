@@ -1,6 +1,6 @@
 # Plan
 
-`cailoxo` generates native prompt scripts from TOML. Current MVP targets `zsh` and Nushell with no prompt framework required at runtime.
+`cailoxo` generates native prompt scripts from TOML. Current MVP targets `zsh`, Nushell, and PowerShell with no prompt framework required at runtime.
 
 ## Current MVP
 
@@ -9,9 +9,11 @@ Implemented:
 - Rust CLI and config parser.
 - `cargo run -- generate --shell zsh` writes `output/prompt.zsh` by default.
 - `cargo run -- generate --shell nu` writes `output/prompt.nu` by default.
+- `cargo run -- generate --shell pwsh` writes `output/prompt.ps1` by default.
 - TOML schema for lines, spans, colors, edges, transient prompt, and Git settings.
 - Native zsh prompt renderer.
 - Native Nushell prompt renderer.
+- Native PowerShell prompt renderer.
 - Adaptive path truncation on prompt render.
 - Local-only Git branch/status collection.
 - Local ahead/behind counts from existing upstream refs.
@@ -20,10 +22,10 @@ Implemented:
 - Path `edge_format` and `gitdir_format` with OMP-style `%s` format strings.
 - zsh transient prompt.
 - Nushell transient prompt variables.
+- PowerShell transient prompt through PSReadLine Enter handler.
 
 Deferred:
 
-- PowerShell generator.
 - Right prompt.
 - Async rendering.
 - Network fetches.
@@ -214,6 +216,12 @@ Nushell:
 - Recomputes prompt on prompt render.
 - Terminal resize while input is already active repaints existing prompt string; Nushell/reedline does not re-run `PROMPT_COMMAND` mid-input.
 
+PowerShell:
+
+- Uses native `prompt` function.
+- Sets `PSReadLine` extra prompt line count for multiline prompt clearing.
+- Supports transient prompt through `Set-PSReadLineKeyHandler -Key Enter` and `InvokePrompt()`.
+
 ## Validation
 
 Current validation commands:
@@ -224,8 +232,10 @@ cargo test
 cargo clippy -- -D warnings
 cargo run -- generate --shell zsh
 cargo run -- generate --shell nu
+cargo run -- generate --shell pwsh
 zsh -n output/prompt.zsh
 nu --no-config-file --commands 'source output/prompt.nu; $env.PROMPT_COMMAND | do $in'
+pwsh -NoLogo -NoProfile -Command '. ./output/prompt.ps1; prompt'
 ```
 
 ## Next Work
@@ -233,5 +243,4 @@ nu --no-config-file --commands 'source output/prompt.nu; $env.PROMPT_COMMAND | d
 - Improve Nu/zsh truncation parity for edge cases.
 - Add tests around icon-set expansion and `{{ status_icon }}`.
 - Add configurable built-in icon overrides.
-- Add PowerShell generator after zsh/Nu behavior stabilizes.
 - Expand docs with generated output examples.

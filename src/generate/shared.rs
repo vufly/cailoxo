@@ -243,6 +243,19 @@ pub fn nu_upstream_icons() -> Result<String> {
     Ok(out)
 }
 
+pub fn icon_pairs(group: &str, set: &str) -> Result<Vec<(String, String)>> {
+    let icons = default_icons()?;
+    let table = icon_table(&icons, group, set).context("missing icon table")?;
+    let mut pairs = Vec::new();
+    for (name, value) in table {
+        let Some(icon) = value.as_str() else {
+            continue;
+        };
+        pairs.push((name.to_string(), icon.to_string()));
+    }
+    Ok(pairs)
+}
+
 fn default_icons() -> Result<toml::Value> {
     toml::from_str(DEFAULT_ICONS).context("failed to parse defaults/icons.toml")
 }
