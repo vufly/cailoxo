@@ -302,7 +302,23 @@ def cailoxo-upstream-info [branch: string] {
 }
 
 def cailoxo-apply-template [template: string, vars: record] {
-  $template
+  let resolved = if not ($template | str contains "{{ if status }}") {
+    $template
+  } else {
+    let parts = ($template | split row "{{ if status }}")
+    let before = ($parts | get 0)
+    let rest = ($parts | get 1)
+    let end_parts = ($rest | split row "{{ end }}")
+    let body = ($end_parts | get 0)
+    let after = ($end_parts | skip 1 | str join "{{ end }}")
+    let branches = ($body | split row "{{ else }}")
+    let then_part = ($branches | get 0)
+    let else_part = if (($branches | length) > 1) { $branches | skip 1 | str join "{{ else }}" } else { "" }
+    let status = ($vars.status? | default "")
+    $before + (if $status != "" { $then_part } else { $else_part }) + $after
+  }
+
+  $resolved
   | str replace --all "{{ icon }}" ($vars.icon? | default "")
   | str replace --all "{{ path }}" ($vars.path? | default "")
   | str replace --all "{{ home_icon }}" ($vars.home_icon? | default "")
@@ -501,7 +517,7 @@ def cailoxo-git-info [] {
     let item = (cailoxo-status-item $name ($counts | get $name))
     if $item != "" { $items = ($items | append $item) }
   }
-  {branch: $branch, status: ($items | str join ($CAILOXO_STATUS_SEPARATOR + " ")), dirty: (($items | length) > 0), upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
+  {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: (($items | length) > 0), upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
 }
 
 def cailoxo-render-full [] {

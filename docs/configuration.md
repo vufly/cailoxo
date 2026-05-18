@@ -138,7 +138,7 @@ Git span uses local repo state only. It does not fetch.
 ```toml
 [[line.span]]
 type = "git"
-template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }} {{ status }} "
+template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }}{{ if status }} {{ status }}{{ end }} "
 foreground = "0"
 background = "2"
 dirty_background = "3"

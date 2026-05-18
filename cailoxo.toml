@@ -43,7 +43,7 @@ gitdir_format = "<b><i>%s</i></b>"
 
 [[line.span]]
 type = "git"
-template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }} {{ status }} "
+template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }}{{ if status }} {{ status }}{{ end }} "
 foreground = "0"
 background = "2"
 dirty_background = "3"
@@ -58,7 +58,7 @@ fetch_upstream_icon = true
 show_branch_status = false
 show_stash_count = true
 icon_set = "minimal"
-separator = " |"
+separator = " "
 
 [line.span.settings.status]
 ahead = "{{status_icon}}{{ count }}"

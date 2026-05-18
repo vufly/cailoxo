@@ -470,6 +470,25 @@ __CAILOXO_UPSTREAM_CASES__    esac
 
   __cailoxo_apply_template() {
     local tpl=$1
+    local before rest body after then_part else_part
+    while [[ $tpl == *'{{ if status }}'* ]]; do
+      before=${tpl%%'{{ if status }}'*}
+      rest=${tpl#*'{{ if status }}'}
+      body=${rest%%'{{ end }}'*}
+      after=${rest#*'{{ end }}'}
+      if [[ $body == *'{{ else }}'* ]]; then
+        then_part=${body%%'{{ else }}'*}
+        else_part=${body#*'{{ else }}'}
+      else
+        then_part=$body
+        else_part=
+      fi
+      if [[ -n $git_status ]]; then
+        tpl="${before}${then_part}${after}"
+      else
+        tpl="${before}${else_part}${after}"
+      fi
+    done
     tpl=${tpl//\{\{ icon \}\}/${os_icon}}
     tpl=${tpl//\{\{ path \}\}/${render_path}}
     tpl=${tpl//\{\{ home_icon \}\}/${home_icon}}
@@ -627,7 +646,7 @@ __CAILOXO_STATUS_CASES__    esac
       if [[ -z $git_status ]]; then
         git_status=$item
       else
-        git_status+="${__CAILOXO_STATUS_SEPARATOR} $item"
+        git_status+="${__CAILOXO_STATUS_SEPARATOR}$item"
       fi
     done
     (( ${#items} > 0 )) && git_dirty=1
