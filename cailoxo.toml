@@ -1,0 +1,81 @@
+# MVP cailoxo config based on the current oh-my-posh theme.
+version = 1
+final_space = true
+console_title = "{{ shell }} {{ folder }}"
+
+[transient]
+enabled = true
+template = " "
+success_foreground = "2"
+error_foreground = "1"
+background = "transparent"
+
+[[line]]
+newline = true
+
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+foreground = "0"
+background = "7"
+head = ""
+tail = ""
+invert_tail = false
+
+[[line.span]]
+type = "path"
+template = " {{ if home }} {{ else }} {{ end }}{{ path }} "
+foreground = "0"
+background = "4"
+separator = ""
+invert_separator = false
+
+[line.span.settings]
+home_icon = "~"
+folder_icon = "…"
+mode = "adaptive"
+min_dirs = 1
+edge_format = "<b>%s</b>"
+gitdir_format = "<b><i>%s</i></b>"
+
+[line.span.settings.mapped_locations]
+"\\\\wsl$\\Ubuntu" = " "
+
+[[line.span]]
+type = "git"
+template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }} {{ status }} "
+foreground = "0"
+background = "2"
+dirty_background = "3"
+separator = ""
+invert_separator = false
+
+[line.span.settings]
+source = "cli"
+fetch_status = true
+fetch_remote = false
+fetch_upstream_icon = false
+show_branch_status = false
+show_stash_count = true
+icon_set = "minimal"
+separator = " |"
+
+[line.span.settings.status]
+ahead = "{{status_icon}}{{ count }}"
+behind = "{{status_icon}}{{ count }}"
+conflicted = "{{status_icon}}{{ count }}"
+untracked = "{{status_icon}}{{ count }}"
+modified = "{{status_icon}}{{ count }}"
+staged = "{{status_icon}}{{ count }}"
+renamed = "{{status_icon}}{{ count }}"
+deleted = "{{status_icon}}{{ count }}"
+stashed = "{{status_icon}}{{ count }}"
+
+[[line]]
+newline = true
+
+[[line.span]]
+type = "text"
+template = "   "
+success_foreground = "2"
+error_foreground = "1"

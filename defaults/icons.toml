@@ -1,0 +1,57 @@
+# Built-in Nerd Font icon dictionaries.
+
+[os.nerdfont]
+linux = ""
+alpine = ""
+android = ""
+arch = ""
+centos = ""
+debian = ""
+fedora = ""
+freebsd = ""
+gentoo = ""
+linux_mint = "󰣭"
+macos = ""
+manjaro = ""
+nixos = ""
+opensuse = ""
+raspbian = ""
+redhat = "󱄛"
+ubuntu = ""
+windows = ""
+wsl = ""
+unknown = ""
+
+[git_branch.nerdfont]
+git = " "
+worktree = " "
+
+[git_upstream.nerdfont]
+github = " "
+gitlab = " "
+bitbucket = " "
+codeberg = " "
+gitea = ""
+azure_devops = "󰿕 "
+
+[git_status.minimal]
+ahead = "⇡"
+behind = "⇣"
+conflicted = "="
+untracked = "?"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+stashed = "#"
+
+[git_status.nerdfont]
+ahead = " "
+behind = " "
+conflicted = "="
+untracked = " "
+modified = " "
+staged = " "
+renamed = "»"
+deleted = "✘"
+stashed = " "
