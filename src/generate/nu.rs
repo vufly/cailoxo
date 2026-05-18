@@ -287,13 +287,7 @@ def cailoxo-os-icon [] {
 
 def cailoxo-upstream-provider [url: string] {
   let normalized = ($url | str downcase)
-  if ($normalized | str contains "github.com") { "github" }
-  else if ($normalized | str contains "gitlab.com") { "gitlab" }
-  else if ($normalized | str contains "bitbucket.org") { "bitbucket" }
-  else if ($normalized | str contains "codeberg.org") { "codeberg" }
-  else if ($normalized | str contains "gitea") { "gitea" }
-  else if ($normalized | str contains "dev.azure.com") or ($normalized | str contains "visualstudio.com") { "azure_devops" }
-  else { "" }
+  if ($normalized | str contains "github.com") { "github" } else if ($normalized | str contains "gitlab.com") { "gitlab" } else if ($normalized | str contains "bitbucket.org") { "bitbucket" } else if ($normalized | str contains "codeberg.org") { "codeberg" } else if ($normalized | str contains "gitea") { "gitea" } else if ($normalized | str contains "dev.azure.com") or ($normalized | str contains "visualstudio.com") { "azure_devops" } else { "" }
 }
 
 def cailoxo-upstream-info [branch: string] {
