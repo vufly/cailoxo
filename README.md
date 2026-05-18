@@ -1,8 +1,10 @@
 # cailoxo
 
-`cailoxo` is a small prompt generator for people who like simple, adaptive prompts across shells.
+`cailoxo` is a small prompt generator for people who want one adaptive prompt across shells.
 
-It reads a TOML config and generates native prompt scripts for shells like `zsh`, PowerShell, and Nushell. The goal is one prompt shape everywhere: OS, path, local Git status, branch, and transient prompt behavior.
+It reads `cailoxo.toml` and generates native prompt scripts for `zsh`, `nu`, and `pwsh`. No prompt framework is required at runtime.
+
+Goal: same prompt shape everywhere: OS, adaptive path, local Git branch/status, and transient prompt behavior.
 
 ## Name
 
@@ -13,19 +15,45 @@ The name matches the prompt behavior: stretch when the terminal is wide, compres
 ## Focus
 
 - TOML config
-- native shell output
+- native shell output for `zsh`, `nu`, and `pwsh`
 - adaptive path truncation based on terminal width
 - local Git branch and status
 - no network fetches during prompt rendering
 - simple transient prompt
 
+## Supported Shells
+
+| Shell ID | Shell | Default output |
+| --- | --- | --- |
+| `zsh` | Zsh | `output/prompt.zsh` |
+| `nu` | Nushell | `output/prompt.nu` |
+| `pwsh` | PowerShell | `output/prompt.ps1` |
+
 ## Usage
+
+Generate prompt scripts:
 
 ```sh
 cailoxo generate --shell zsh
 cailoxo generate --shell nu
 cailoxo generate --shell pwsh
 ```
+
+Source generated scripts from shell startup files:
+
+```zsh
+source /path/to/cailoxo/output/prompt.zsh
+```
+
+```nu
+source /path/to/cailoxo/output/prompt.nu
+```
+
+```powershell
+. /path/to/cailoxo/output/prompt.ps1
+```
+
+Use `--output` to write generated scripts somewhere else.
 
 See `docs/configuration.md` for config details.
 
@@ -49,6 +77,19 @@ cargo run -- generate --shell pwsh; pwsh -NoLogo -NoProfile -Command '. ./output
    ~/labs/cailoxo/src   feature/native-prompts !1 
 ❯
 ```
+
+## Release
+
+Releases are tag-driven. Push a version tag to build GitHub release assets and publish to crates.io:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub release assets include `x86_64` and `aarch64` binaries for Linux, macOS, and Windows.
+
+Crates.io publish requires repository secret `CARGO_REGISTRY_TOKEN`.
 
 ## Status
 
