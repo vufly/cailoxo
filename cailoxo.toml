@@ -53,7 +53,9 @@ invert_separator = false
 [line.span.settings]
 source = "cli"
 fetch_status = true
-fetch_remote = false
+fetch_remote = true
+fetch_remote_interval_ms = 60000
+fetch_remote_timeout_ms = 5000
 fetch_upstream_icon = true
 show_branch_status = false
 show_stash_count = true

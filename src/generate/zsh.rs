@@ -158,6 +158,23 @@ fn write_consts(
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
     let branch_icon = git_branch_icon(git)?;
     let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
+    let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
+    let fetch_remote_interval_s = git
+        .settings
+        .get("fetch_remote_interval_ms")
+        .and_then(|value| value.as_integer())
+        .unwrap_or(60_000)
+        .max(0)
+        .saturating_add(999)
+        / 1000;
+    let fetch_remote_timeout_s = git
+        .settings
+        .get("fetch_remote_timeout_ms")
+        .and_then(|value| value.as_integer())
+        .unwrap_or(5_000)
+        .max(1)
+        .saturating_add(999)
+        / 1000;
 
     writeln!(
         out,
@@ -218,6 +235,19 @@ fn write_consts(
         out,
         "  typeset -gi __CAILOXO_FETCH_UPSTREAM_ICON={}",
         usize::from(fetch_upstream_icon)
+    )?;
+    writeln!(
+        out,
+        "  typeset -gi __CAILOXO_FETCH_REMOTE={}",
+        usize::from(fetch_remote)
+    )?;
+    writeln!(
+        out,
+        "  typeset -gi __CAILOXO_FETCH_REMOTE_INTERVAL_S={fetch_remote_interval_s}"
+    )?;
+    writeln!(
+        out,
+        "  typeset -gi __CAILOXO_FETCH_REMOTE_TIMEOUT_S={fetch_remote_timeout_s}"
     )?;
     writeln!(out, "  typeset -gi __CAILOXO_MIN_DIRS={min_dirs}")?;
     writeln!(
@@ -460,12 +490,67 @@ __CAILOXO_OS_CASES__      *) print -r -- __CAILOXO_OS_UNKNOWN__ ;;
   __cailoxo_upstream_icon() {
     (( __CAILOXO_FETCH_UPSTREAM_ICON )) || return
     local remote url provider upstream_icon=
-    remote=$(git config --get "branch.$branch.remote" 2>/dev/null) || remote=origin
+    remote=$(__cailoxo_remote_name)
     url=$(git config --get "remote.$remote.url" 2>/dev/null) || return
     provider=$(__cailoxo_upstream_provider "$url")
     case $provider in
 __CAILOXO_UPSTREAM_CASES__    esac
     print -r -- "$upstream_icon"
+  }
+
+  __cailoxo_remote_name() {
+    local remote
+    remote=$(git config --get "branch.$branch.remote" 2>/dev/null) || remote=origin
+    [[ -n $remote ]] || remote=origin
+    print -r -- "$remote"
+  }
+
+  __cailoxo_now_s() {
+    zmodload zsh/datetime 2>/dev/null
+    print -r -- "${EPOCHSECONDS:-$(date +%s 2>/dev/null || print -r -- 0)}"
+  }
+
+  __cailoxo_start_fetch() {
+    (( __CAILOXO_FETCH_REMOTE )) || return
+    [[ -n $branch ]] || return
+    if [[ -n $__CAILOXO_FETCH_PID && -n $__CAILOXO_FETCH_MARKER && ! -e $__CAILOXO_FETCH_MARKER ]]; then
+      kill -0 $__CAILOXO_FETCH_PID 2>/dev/null && return
+    fi
+
+    local remote root key now marker
+    remote=$(__cailoxo_remote_name)
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+    [[ -n $root && -n $remote ]] || return
+    key="$root|$remote"
+    now=$(__cailoxo_now_s)
+    if [[ $__CAILOXO_FETCH_LAST_KEY == "$key" && $(( now - __CAILOXO_FETCH_LAST_START_S )) -lt $__CAILOXO_FETCH_REMOTE_INTERVAL_S ]]; then
+      return
+    fi
+
+    marker="${TMPDIR:-/tmp}/cailoxo-fetch-${$}-${RANDOM}"
+    rm -f -- "$marker" 2>/dev/null
+    __CAILOXO_FETCH_LAST_KEY=$key
+    __CAILOXO_FETCH_LAST_START_S=$now
+    __CAILOXO_FETCH_MARKER=$marker
+    (
+      cd "$root" || exit 0
+      if (( __CAILOXO_FETCH_REMOTE_TIMEOUT_S > 0 )) && command -v timeout >/dev/null 2>&1; then
+        command timeout "${__CAILOXO_FETCH_REMOTE_TIMEOUT_S}s" git fetch --quiet --no-tags "$remote" >/dev/null 2>&1
+      else
+        command git fetch --quiet --no-tags "$remote" >/dev/null 2>&1
+      fi
+      : >| "$marker"
+    ) >/dev/null 2>&1 &
+    __CAILOXO_FETCH_PID=$!
+  }
+
+  __cailoxo_chld() {
+    [[ -n $__CAILOXO_FETCH_PID && -n $__CAILOXO_FETCH_MARKER && -e $__CAILOXO_FETCH_MARKER ]] || return
+    wait $__CAILOXO_FETCH_PID 2>/dev/null || true
+    rm -f -- "$__CAILOXO_FETCH_MARKER" 2>/dev/null
+    __CAILOXO_FETCH_PID=
+    __CAILOXO_FETCH_MARKER=
+    __cailoxo_winch
   }
 
   __cailoxo_apply_template() {
@@ -604,11 +689,12 @@ __CAILOXO_STATUS_CASES__    esac
     [[ -n $branch ]] || return
     if (( __CAILOXO_FETCH_UPSTREAM_ICON )); then
       local remote
-      remote=$(git config --get "branch.$branch.remote" 2>/dev/null) || remote=origin
+      remote=$(__cailoxo_remote_name)
       upstream_url=$(git config --get "remote.$remote.url" 2>/dev/null) || upstream_url=
       upstream=$(__cailoxo_upstream_provider "$upstream_url")
       upstream_icon=$(__cailoxo_upstream_icon)
     fi
+    __cailoxo_start_fetch
 
     local ahead=0 behind=0 conflicted=0 untracked=0 modified=0 staged=0 renamed=0 deleted=0 stashed=0
     local out line code x y
@@ -761,6 +847,7 @@ __CAILOXO_STATUS_CASES__    esac
     out.push_str(
         r#"  add-zsh-hook precmd __cailoxo_precmd
   TRAPWINCH() { __cailoxo_winch }
+  TRAPCHLD() { __cailoxo_chld }
   __cailoxo_precmd
 "#,
     );
@@ -806,6 +893,7 @@ mod tests {
         assert!(script.contains("__cailoxo_git_info"));
         assert!(script.contains("__cailoxo_style_template"));
         assert!(script.contains("__cailoxo_format_path"));
+        assert!(script.contains("__cailoxo_start_fetch"));
         assert!(script.contains("text=${text//'<b>'/$bold_on}"));
         assert!(script.contains("zle-line-finish"));
     }

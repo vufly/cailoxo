@@ -144,6 +144,13 @@ fn write_consts(
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
     let branch_icon = git_branch_icon(git)?;
     let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
+    let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
+    let fetch_remote_interval_ms = git
+        .settings
+        .get("fetch_remote_interval_ms")
+        .and_then(|value| value.as_integer())
+        .unwrap_or(60_000)
+        .max(0);
 
     writeln!(
         out,
@@ -204,6 +211,15 @@ fn write_consts(
         out,
         "const CAILOXO_FETCH_UPSTREAM_ICON = {}",
         if fetch_upstream_icon { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "const CAILOXO_FETCH_REMOTE = {}",
+        if fetch_remote { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "const CAILOXO_FETCH_REMOTE_INTERVAL_MS = {fetch_remote_interval_ms}"
     )?;
     writeln!(out, "const CAILOXO_MIN_DIRS = {min_dirs}")?;
     writeln!(
@@ -290,10 +306,39 @@ def cailoxo-upstream-provider [url: string] {
   if ($normalized | str contains "github.com") { "github" } else if ($normalized | str contains "gitlab.com") { "gitlab" } else if ($normalized | str contains "bitbucket.org") { "bitbucket" } else if ($normalized | str contains "codeberg.org") { "codeberg" } else if ($normalized | str contains "gitea") { "gitea" } else if ($normalized | str contains "dev.azure.com") or ($normalized | str contains "visualstudio.com") { "azure_devops" } else { "" }
 }
 
+def cailoxo-remote-name [branch: string] {
+  let remote = (git config --get $"branch.($branch).remote" | complete)
+  if $remote.exit_code == 0 and ($remote.stdout | str trim) != "" { $remote.stdout | str trim } else { "origin" }
+}
+
+def cailoxo-start-fetch [branch: string] {
+  if not $CAILOXO_FETCH_REMOTE { return }
+  let remote = (cailoxo-remote-name $branch)
+  let root_out = (git rev-parse --show-toplevel | complete)
+  if $root_out.exit_code != 0 { return }
+  let root = ($root_out.stdout | str trim)
+  if $root == "" or $remote == "" { return }
+
+  let key = $"($root)|($remote)"
+  let now = (date now | into int)
+  let last_key = ($env.CAILOXO_FETCH_LAST_KEY? | default "")
+  let last_start = (($env.CAILOXO_FETCH_LAST_START_NS? | default 0) | into int)
+  let interval = ($CAILOXO_FETCH_REMOTE_INTERVAL_MS * 1000000)
+  if $last_key == $key and (($now - $last_start) < $interval) { return }
+  $env.CAILOXO_FETCH_LAST_KEY = $key
+  $env.CAILOXO_FETCH_LAST_START_NS = $now
+
+  let repo_root = $root
+  let remote_name = $remote
+  job spawn --description "cailoxo git fetch" {||
+    cd $repo_root
+    git fetch --quiet --no-tags $remote_name | complete | ignore
+  } | ignore
+}
+
 def cailoxo-upstream-info [branch: string] {
   if not $CAILOXO_FETCH_UPSTREAM_ICON { return {upstream: "", upstream_icon: "", upstream_url: ""} }
-  let remote = (git config --get $"branch.($branch).remote" | complete)
-  let remote_name = if $remote.exit_code == 0 and ($remote.stdout | str trim) != "" { $remote.stdout | str trim } else { "origin" }
+  let remote_name = (cailoxo-remote-name $branch)
   let url_out = (git config --get $"remote.($remote_name).url" | complete)
   let upstream_url = if $url_out.exit_code == 0 { $url_out.stdout | str trim } else { "" }
   let upstream = (cailoxo-upstream-provider $upstream_url)
@@ -483,6 +528,7 @@ def cailoxo-git-info [] {
   }
   if $branch == "" { return {branch: "", status: "", dirty: false, upstream: "", upstream_icon: "", upstream_url: ""} }
   let upstream = (cailoxo-upstream-info $branch)
+  cailoxo-start-fetch $branch
 
   mut counts = {ahead: 0, behind: 0, conflicted: 0, untracked: 0, modified: 0, staged: 0, renamed: 0, deleted: 0, stashed: 0}
   let status_out = (git status --porcelain=v1 | complete)
@@ -605,6 +651,7 @@ mod tests {
         assert!(script.contains("def cailoxo-git-info"));
         assert!(script.contains("def cailoxo-style-template"));
         assert!(script.contains("def cailoxo-format-path"));
+        assert!(script.contains("def cailoxo-start-fetch"));
         assert!(script.contains("str replace --all \"<b>\""));
         assert!(script.contains("TRANSIENT_PROMPT_COMMAND"));
     }

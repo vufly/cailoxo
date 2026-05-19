@@ -143,7 +143,7 @@ The generated prompt recalculates on each render and uses current terminal width
 
 ## Git
 
-Git span uses local repo state only. It does not fetch.
+Git span uses local repo state by default. It can also refresh upstream refs asynchronously when `fetch_remote = true`.
 
 ```toml
 [[line.span]]
@@ -157,6 +157,8 @@ separator = ""
 [line.span.settings]
 fetch_status = true
 fetch_remote = false
+fetch_remote_interval_ms = 60000
+fetch_remote_timeout_ms = 5000
 fetch_upstream_icon = false
 show_branch_status = false
 show_stash_count = true
@@ -164,7 +166,15 @@ icon_set = "minimal"
 separator = " |"
 ```
 
-Ahead and behind counts use existing local upstream refs only.
+Ahead and behind counts use existing local upstream refs. With `fetch_remote = true`, the prompt still renders immediately from local refs, then starts a throttled background `git fetch --quiet --no-tags <remote>`.
+
+Refresh behavior differs by shell:
+
+- `zsh`: repaints the current prompt when fetch completes.
+- `pwsh`: attempts to repaint the current prompt with `PSConsoleReadLine.InvokePrompt()` when fetch completes.
+- `nu`: picks up fetched refs on the next prompt render.
+
+`fetch_remote_interval_ms` throttles fetch starts per repository/remote. `fetch_remote_timeout_ms` limits each background fetch in zsh and PowerShell when supported.
 Git `branch_icon`, `upstream_icon`, and `status` symbols come from `defaults/icons.toml`. `icon_set` selects `git_status.<set>`; default config uses `minimal`.
 
 ## Templates
