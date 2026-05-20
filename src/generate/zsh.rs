@@ -1223,6 +1223,7 @@ __CAILOXO_STATUS_CASES__    esac
     ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || print -r -- 0)
     behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || print -r -- 0)
     stashed=$(git stash list 2>/dev/null | wc -l | tr -d ' ')
+    (( conflicted || untracked || modified || staged || renamed || deleted )) && git_dirty=1
 
     local -a items
     local item name
@@ -1238,7 +1239,6 @@ __CAILOXO_STATUS_CASES__    esac
         git_status+="${__CAILOXO_STATUS_SEPARATOR}$item"
       fi
     done
-    (( ${#items} > 0 )) && git_dirty=1
   }
 
   __cailoxo_render_full_prompt() {
@@ -1406,6 +1406,10 @@ mod tests {
         assert!(script.contains("typeset -gi __CAILOXO_OSC7=1"));
         assert!(script.contains("__cailoxo_start_fetch"));
         assert!(script.contains("text=${text//'<b>'/$bold_on}"));
+        assert!(script.contains(
+            "(( conflicted || untracked || modified || staged || renamed || deleted )) && git_dirty=1"
+        ));
+        assert!(!script.contains("(( ${#items} > 0 )) && git_dirty=1"));
         assert!(script.contains("zle-line-finish"));
     }
 

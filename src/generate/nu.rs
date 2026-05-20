@@ -902,13 +902,14 @@ def cailoxo-git-info [] {
   if $behind_out.exit_code == 0 { $counts = ($counts | upsert behind (($behind_out.stdout | str trim | into int) | default 0)) }
   let stash_out = (git stash list | complete)
   if $stash_out.exit_code == 0 { $counts = ($counts | upsert stashed (($stash_out.stdout | lines | length) | default 0)) }
+  let dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) > 0)
 
   mut items = []
   for name in [ahead behind conflicted untracked modified staged renamed deleted stashed] {
     let item = (cailoxo-status-item $name ($counts | get $name))
     if $item != "" { $items = ($items | append $item) }
   }
-  {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: (($items | length) > 0), upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
+  {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: $dirty, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
 }
 
 def cailoxo-render-main [] {
@@ -1011,6 +1012,10 @@ mod tests {
         assert!(script.contains("def cailoxo-format-path"));
         assert!(script.contains("def cailoxo-start-fetch"));
         assert!(script.contains("str replace --all \"<b>\""));
+        assert!(script.contains(
+            "let dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) > 0)"
+        ));
+        assert!(!script.contains("dirty: (($items | length) > 0)"));
         assert!(script.contains("$env.PROMPT_INDICATOR = {|| cailoxo-render-indicator }"));
         assert!(
             script.contains("$env.TRANSIENT_PROMPT_INDICATOR = {|| cailoxo-render-transient }")

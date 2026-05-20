@@ -1059,13 +1059,14 @@ function Cailoxo-Git-Info {
   $counts.behind = Cailoxo-Count-Command { git rev-list --count 'HEAD..@{upstream}' }
   $stash = & git stash list 2>$null
   if ($LASTEXITCODE -eq 0) { $counts.stashed = @($stash | Where-Object { $_ -ne '' }).Count }
+  $dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) -gt 0)
 
   $items = @()
   foreach ($name in @('ahead', 'behind', 'conflicted', 'untracked', 'modified', 'staged', 'renamed', 'deleted', 'stashed')) {
     $item = Cailoxo-Status-Item $name $counts[$name]
     if ($item -ne '') { $items += $item }
   }
-  @{ branch = $branch; status = ($items -join $script:CAILOXO_STATUS_SEPARATOR); dirty = ($items.Count -gt 0); upstream = $upstream.upstream; upstream_icon = $upstream.upstream_icon; upstream_url = $upstream.upstream_url }
+  @{ branch = $branch; status = ($items -join $script:CAILOXO_STATUS_SEPARATOR); dirty = $dirty; upstream = $upstream.upstream; upstream_icon = $upstream.upstream_icon; upstream_url = $upstream.upstream_url }
 }
 
 function Cailoxo-Render-Full {
@@ -1196,6 +1197,10 @@ mod tests {
         assert!(script.contains("function Cailoxo-Git-Url-Start"));
         assert!(script.contains("$script:CAILOXO_OSC7 = $true"));
         assert!(script.contains("function Cailoxo-Start-Fetch"));
+        assert!(script.contains(
+            "$dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) -gt 0)"
+        ));
+        assert!(!script.contains("dirty = ($items.Count -gt 0)"));
         assert!(script.contains("Set-PSReadLineKeyHandler"));
         assert!(script.contains("function prompt"));
     }
