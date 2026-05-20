@@ -37,6 +37,8 @@ mode = "adaptive"
 min_dirs = 1
 edge_format = "<b>%s</b>"
 gitdir_format = "<b><i>%s</i></b>"
+url = true
+osc7 = true
 
 [line.span.settings.mapped_locations]
 "\\\\wsl$\\Ubuntu" = " "
@@ -61,6 +63,7 @@ show_branch_status = false
 show_stash_count = true
 icon_set = "minimal"
 separator = " "
+url = true
 
 [line.span.settings.status]
 ahead = "{{status_icon}}{{ count }}"

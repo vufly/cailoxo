@@ -142,8 +142,13 @@ fn write_consts(
 ) -> Result<()> {
     let min_dirs = path.setting_str("min_dirs").unwrap_or("1");
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
+    let path_url = path.setting_bool("url").unwrap_or(false)
+        || path.setting_bool("hyperlink").unwrap_or(false);
+    let osc7 = path.setting_bool("osc7").unwrap_or(false);
     let branch_icon = git_branch_icon(git)?;
     let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
+    let git_url =
+        git.setting_bool("url").unwrap_or(false) || git.setting_bool("hyperlink").unwrap_or(false);
     let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
     let fetch_remote_interval_ms = git
         .settings
@@ -192,6 +197,11 @@ fn write_consts(
     )?;
     writeln!(
         out,
+        "$script:CAILOXO_GIT_URL = ${}",
+        if git_url { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
         "$script:CAILOXO_FETCH_REMOTE = ${}",
         if fetch_remote { "true" } else { "false" }
     )?;
@@ -208,6 +218,16 @@ fn write_consts(
         out,
         "$script:CAILOXO_FINAL_SPACE = ${}",
         if final_space { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "$script:CAILOXO_PATH_URL = ${}",
+        if path_url { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "$script:CAILOXO_OSC7 = ${}",
+        if osc7 { "true" } else { "false" }
     )?;
     write_var(out, "CAILOXO_OS_STYLE", os_style)?;
     write_var(out, "CAILOXO_PATH_STYLE", path_style)?;
@@ -290,6 +310,38 @@ function Cailoxo-Format-Part {
   if ([string]::IsNullOrEmpty($Format)) { return $Value }
   if ($Format.Contains('%s')) { return $Format.Replace('%s', $Value) }
   $Value
+}
+
+function Cailoxo-Url-Escape {
+  param([string]$Path)
+  $Path.Replace('\', '/').Replace('%', '%25').Replace(' ', '%20').Replace('#', '%23').Replace('?', '%3F').Replace(';', '%3B')
+}
+
+function Cailoxo-HostName {
+  if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) { return $env:COMPUTERNAME }
+  if (-not [string]::IsNullOrWhiteSpace($env:HOSTNAME)) { return $env:HOSTNAME }
+  try { return ([System.Net.Dns]::GetHostName()) } catch { return '' }
+}
+
+function Cailoxo-File-Url {
+  $path = Cailoxo-Url-Escape ((Get-Location).ProviderPath)
+  if ($path -match '^[A-Za-z]:/') { return "file:///$path" }
+  "file://$(Cailoxo-HostName)$path"
+}
+
+function Cailoxo-Osc7 {
+  if (-not $script:CAILOXO_OSC7) { return '' }
+  "$([char]27)]7;$(Cailoxo-File-Url)$([char]27)\"
+}
+
+function Cailoxo-Path-Url-Start {
+  if (-not $script:CAILOXO_PATH_URL) { return '' }
+  "$([char]27)]8;;$(Cailoxo-File-Url)$([char]27)\"
+}
+
+function Cailoxo-Path-Url-End {
+  if (-not $script:CAILOXO_PATH_URL) { return '' }
+  "$([char]27)]8;;$([char]27)\"
 }
 
 function Cailoxo-Normalize-Path {
@@ -419,16 +471,63 @@ function Cailoxo-Upstream-Provider {
   ''
 }
 
+function Cailoxo-Clean-Git-Url {
+  param([string]$RemoteUrl)
+  $url = $RemoteUrl.Trim() -replace '\.git/?$', '' -replace '/$', ''
+  if ([string]::IsNullOrWhiteSpace($url)) { return '' }
+  if ($url.StartsWith('http://') -or $url.StartsWith('https://')) { return $url }
+
+  if ($url -match '^git@ssh\.dev\.azure\.com:v3/(?<org>[^/]+)/(?<project>[^/]+)/(?<repo>[^/]+)$') {
+    return "https://dev.azure.com/$($Matches.org)/$($Matches.project)/_git/$($Matches.repo)"
+  }
+
+  if ($url -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+    $rest = $url -replace '^[A-Za-z][A-Za-z0-9+.-]*://', ''
+    if ($rest.Contains('@')) { $rest = ($rest -split '@')[-1] }
+    $slash = $rest.IndexOf('/')
+    if ($slash -lt 0) { return '' }
+    $host = $rest.Substring(0, $slash).Split(':')[0]
+    $path = $rest.Substring($slash + 1)
+    if ($host -eq 'ssh.dev.azure.com' -and $path -match '^v3/(?<org>[^/]+)/(?<project>[^/]+)/(?<repo>[^/]+)$') {
+      return "https://dev.azure.com/$($Matches.org)/$($Matches.project)/_git/$($Matches.repo)"
+    }
+    if ($host -ne '' -and $path -ne '') { return "https://$host/$path" }
+  }
+
+  if ($url -match '^[^@]+@(?<host>[^:]+):(?<path>.+)$') {
+    return "https://$($Matches.host)/$($Matches.path)"
+  }
+
+  if ($url -match '^(?<host>[A-Za-z0-9.-]+):(?<path>.+)$') {
+    return "https://$($Matches.host)/$($Matches.path)"
+  }
+
+  ''
+}
+
+function Cailoxo-Git-Url-Start {
+  param([string]$Url)
+  if (-not $script:CAILOXO_GIT_URL -or [string]::IsNullOrWhiteSpace($Url)) { return '' }
+  "$([char]27)]8;;$Url$([char]27)\"
+}
+
+function Cailoxo-Git-Url-End {
+  param([string]$Url)
+  if (-not $script:CAILOXO_GIT_URL -or [string]::IsNullOrWhiteSpace($Url)) { return '' }
+  "$([char]27)]8;;$([char]27)\"
+}
+
 function Cailoxo-Upstream-Info {
   param([string]$Branch)
   $info = @{ upstream = ''; upstream_icon = ''; upstream_url = '' }
-  if (-not $script:CAILOXO_FETCH_UPSTREAM_ICON) { return $info }
+  if (-not $script:CAILOXO_FETCH_UPSTREAM_ICON -and -not $script:CAILOXO_GIT_URL) { return $info }
   $remote = Cailoxo-Remote-Name $Branch
   $url = (& git config --get "remote.$remote.url" 2>$null) -join ''
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($url)) { return $info }
-  $upstream = Cailoxo-Upstream-Provider $url.Trim()
-  $icon = if ($upstream -ne '' -and $script:CAILOXO_UPSTREAM_ICONS.ContainsKey($upstream)) { $script:CAILOXO_UPSTREAM_ICONS[$upstream] } else { '' }
-  @{ upstream = $upstream; upstream_icon = $icon; upstream_url = $url.Trim() }
+  $rawUrl = $url.Trim()
+  $upstream = Cailoxo-Upstream-Provider $rawUrl
+  $icon = if ($script:CAILOXO_FETCH_UPSTREAM_ICON -and $upstream -ne '' -and $script:CAILOXO_UPSTREAM_ICONS.ContainsKey($upstream)) { $script:CAILOXO_UPSTREAM_ICONS[$upstream] } else { '' }
+  @{ upstream = $upstream; upstream_icon = $icon; upstream_url = (Cailoxo-Clean-Git-Url $rawUrl) }
 }
 
 function Cailoxo-Remote-Name {
@@ -688,9 +787,9 @@ function Cailoxo-Render-Full {
   $gitStyle = if ($git.dirty) { $script:CAILOXO_GIT_DIRTY_STYLE } else { $script:CAILOXO_GIT_CLEAN_STYLE }
   $pathSep = if ($gitText -eq '') { $script:CAILOXO_PATH_SEP_LAST } elseif ($git.dirty) { $script:CAILOXO_PATH_SEP_DIRTY } else { $script:CAILOXO_PATH_SEP_CLEAN }
   $gitSep = if ($git.dirty) { $script:CAILOXO_GIT_SEP_DIRTY } else { $script:CAILOXO_GIT_SEP_CLEAN }
-  $first = $script:CAILOXO_OS_STYLE + (Cailoxo-Style-Template $osText) + $script:CAILOXO_RESET + $script:CAILOXO_OS_TAIL
-  $first += $script:CAILOXO_PATH_STYLE + (Cailoxo-Style-Template $pathText) + $script:CAILOXO_RESET + $pathSep
-  if ($gitText -ne '') { $first += $gitStyle + (Cailoxo-Style-Template $gitText) + $script:CAILOXO_RESET + $gitSep }
+  $first = (Cailoxo-Osc7) + $script:CAILOXO_OS_STYLE + (Cailoxo-Style-Template $osText) + $script:CAILOXO_RESET + $script:CAILOXO_OS_TAIL
+  $first += $script:CAILOXO_PATH_STYLE + (Cailoxo-Path-Url-Start) + (Cailoxo-Style-Template $pathText) + (Cailoxo-Path-Url-End) + $script:CAILOXO_RESET + $pathSep
+  if ($gitText -ne '') { $first += $gitStyle + (Cailoxo-Git-Url-Start $git.upstream_url) + (Cailoxo-Style-Template $gitText) + (Cailoxo-Git-Url-End $git.upstream_url) + $script:CAILOXO_RESET + $gitSep }
 
   $promptStyle = if ($LastStatus -eq 0) { $script:CAILOXO_PROMPT_OK_STYLE } else { $script:CAILOXO_PROMPT_ERROR_STYLE }
   $suffix = if ($script:CAILOXO_FINAL_SPACE) { ' ' } else { '' }
@@ -786,6 +885,9 @@ mod tests {
         assert!(script.contains("function Cailoxo-Git-Info"));
         assert!(script.contains("function Cailoxo-Style-Template"));
         assert!(script.contains("function Cailoxo-Format-Path"));
+        assert!(script.contains("function Cailoxo-Path-Url-Start"));
+        assert!(script.contains("function Cailoxo-Git-Url-Start"));
+        assert!(script.contains("$script:CAILOXO_OSC7 = $true"));
         assert!(script.contains("function Cailoxo-Start-Fetch"));
         assert!(script.contains("Set-PSReadLineKeyHandler"));
         assert!(script.contains("function prompt"));

@@ -135,11 +135,17 @@ mode = "adaptive"
 min_dirs = 1
 edge_format = "<b>%s</b>"
 gitdir_format = "<b><i>%s</i></b>"
+url = true
+osc7 = true
 ```
 
 The generated prompt recalculates on each render and uses current terminal width.
 
 `edge_format` formats the first and last visible path parts. `gitdir_format` formats the Git repository root folder when it is visible in the path. Both use OMP-style `%s` format strings and support the same decoration tags as templates.
+
+`url = true` wraps the rendered path span in an OSC8 `file://` hyperlink, so supported terminals can open the folder from the prompt. `osc7 = true` emits OSC7 current-directory metadata before the prompt for terminals that track shell CWD.
+
+Nushell/Reedline does not expose OSC8 links from prompt strings reliably. Generated Nu prompts ignore `url` and `osc7` for path spans.
 
 ## Git
 
@@ -164,6 +170,7 @@ show_branch_status = false
 show_stash_count = true
 icon_set = "minimal"
 separator = " |"
+url = true
 ```
 
 Ahead and behind counts use existing local upstream refs. With `fetch_remote = true`, the prompt still renders immediately from local refs, then starts a throttled background `git fetch --quiet --no-tags <remote>`.
@@ -176,6 +183,10 @@ Refresh behavior differs by shell:
 
 `fetch_remote_interval_ms` throttles fetch starts per repository/remote. `fetch_remote_timeout_ms` limits each background fetch in zsh and PowerShell when supported.
 Git `branch_icon`, `upstream_icon`, and `status` symbols come from `defaults/icons.toml`. `icon_set` selects `git_status.<set>`; default config uses `minimal`.
+
+`url = true` wraps the rendered Git span in an OSC8 hyperlink to the upstream repository. SSH remotes such as `git@github.com:user/repo.git` are converted to browser URLs such as `https://github.com/user/repo`.
+
+Nushell/Reedline does not expose OSC8 links from prompt strings reliably. Generated Nu prompts ignore `url` for Git spans.
 
 ## Templates
 

@@ -156,8 +156,13 @@ fn write_consts(
 ) -> Result<()> {
     let min_dirs = path.setting_str("min_dirs").unwrap_or("1");
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
+    let path_url = path.setting_bool("url").unwrap_or(false)
+        || path.setting_bool("hyperlink").unwrap_or(false);
+    let osc7 = path.setting_bool("osc7").unwrap_or(false);
     let branch_icon = git_branch_icon(git)?;
     let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
+    let git_url =
+        git.setting_bool("url").unwrap_or(false) || git.setting_bool("hyperlink").unwrap_or(false);
     let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
     let fetch_remote_interval_s = git
         .settings
@@ -238,6 +243,11 @@ fn write_consts(
     )?;
     writeln!(
         out,
+        "  typeset -gi __CAILOXO_GIT_URL={}",
+        usize::from(git_url)
+    )?;
+    writeln!(
+        out,
         "  typeset -gi __CAILOXO_FETCH_REMOTE={}",
         usize::from(fetch_remote)
     )?;
@@ -255,6 +265,12 @@ fn write_consts(
         "  typeset -gi __CAILOXO_FINAL_SPACE={}",
         usize::from(final_space)
     )?;
+    writeln!(
+        out,
+        "  typeset -gi __CAILOXO_PATH_URL={}",
+        usize::from(path_url)
+    )?;
+    writeln!(out, "  typeset -gi __CAILOXO_OSC7={}", usize::from(osc7))?;
     writeln!(out, "  typeset -g __CAILOXO_OS_STYLE=$'{}'", os_style)?;
     writeln!(out, "  typeset -g __CAILOXO_PATH_STYLE=$'{}'", path_style)?;
     writeln!(
@@ -387,6 +403,42 @@ fn write_body(out: &mut String, git: &Span, transient_enabled: bool) -> Result<(
     print -r -- "$text"
   }
 
+  __cailoxo_url_escape() {
+    local value=${1//\\//}
+    value=${value//\%/%25}
+    value=${value// /%20}
+    value=${value//\#/%23}
+    value=${value//\?/%3F}
+    value=${value//\;/%3B}
+    print -r -- "$value"
+  }
+
+  __cailoxo_file_url() {
+    local path=$(__cailoxo_url_escape "$PWD") host=${HOST:-$(hostname 2>/dev/null)}
+    if [[ $path == [[:alpha:]]:/* ]]; then
+      print -r -- "file:///$path"
+    else
+      print -r -- "file://$host$path"
+    fi
+  }
+
+  __cailoxo_osc7() {
+    (( __CAILOXO_OSC7 )) || return
+    local url=$(__cailoxo_file_url)
+    [[ -n $url ]] && __cailoxo_pansi $'\e]7;'"$url"$'\e\\'
+  }
+
+  __cailoxo_path_url_start() {
+    (( __CAILOXO_PATH_URL )) || return
+    local url=$(__cailoxo_file_url)
+    [[ -n $url ]] && __cailoxo_pansi $'\e]8;;'"$url"$'\e\\'
+  }
+
+  __cailoxo_path_url_end() {
+    (( __CAILOXO_PATH_URL )) || return
+    __cailoxo_pansi $'\e]8;;\e\\'
+  }
+
   __cailoxo_format_part() {
     local value=$1 format=$2
     [[ -n $format ]] || { print -r -- "$value"; return }
@@ -485,6 +537,73 @@ __CAILOXO_OS_CASES__      *) print -r -- __CAILOXO_OS_UNKNOWN__ ;;
     elif [[ $url == *gitea* ]]; then print -r -- gitea
     elif [[ $url == *dev.azure.com* || $url == *visualstudio.com* ]]; then print -r -- azure_devops
     fi
+  }
+
+  __cailoxo_clean_git_url() {
+    local url=$1 rest host path
+    [[ -n $url ]] || return
+    url=${url%/}
+    url=${url%.git}
+
+    if [[ $url == http://* || $url == https://* ]]; then
+      print -r -- "$url"
+      return
+    fi
+
+    if [[ $url == git@ssh.dev.azure.com:v3/* ]]; then
+      path=${url#git@ssh.dev.azure.com:v3/}
+      local -a parts
+      parts=(${(s:/:)path})
+      if (( ${#parts} >= 3 )); then
+        print -r -- "https://dev.azure.com/$parts[1]/$parts[2]/_git/$parts[3]"
+        return
+      fi
+    fi
+
+    if [[ $url == *://* ]]; then
+      rest=${url#*://}
+      rest=${rest#*@}
+      host=${rest%%/*}
+      path=${rest#*/}
+      host=${host%%:*}
+      if [[ $host == ssh.dev.azure.com && $path == v3/* ]]; then
+        local -a parts
+        parts=(${(s:/:)path})
+        if (( ${#parts} >= 4 )); then
+          print -r -- "https://dev.azure.com/$parts[2]/$parts[3]/_git/$parts[4]"
+          return
+        fi
+      fi
+      [[ $path != $rest && -n $host && -n $path ]] && print -r -- "https://$host/$path"
+      return
+    fi
+
+    if [[ $url == *@*:* ]]; then
+      rest=${url#*@}
+      host=${rest%%:*}
+      path=${rest#*:}
+      [[ -n $host && -n $path ]] && print -r -- "https://$host/$path"
+      return
+    fi
+
+    if [[ $url == *:* ]]; then
+      host=${url%%:*}
+      path=${url#*:}
+      [[ -n $host && -n $path ]] && print -r -- "https://$host/$path"
+      return
+    fi
+  }
+
+  __cailoxo_git_url_start() {
+    (( __CAILOXO_GIT_URL )) || return
+    [[ -n $upstream_url ]] || return
+    __cailoxo_pansi $'\e]8;;'"$upstream_url"$'\e\\'
+  }
+
+  __cailoxo_git_url_end() {
+    (( __CAILOXO_GIT_URL )) || return
+    [[ -n $upstream_url ]] || return
+    __cailoxo_pansi $'\e]8;;\e\\'
   }
 
   __cailoxo_upstream_icon() {
@@ -694,12 +813,15 @@ __CAILOXO_STATUS_CASES__    esac
 
     branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null) || branch=
     [[ -n $branch ]] || return
-    if (( __CAILOXO_FETCH_UPSTREAM_ICON )); then
+    if (( __CAILOXO_FETCH_UPSTREAM_ICON || __CAILOXO_GIT_URL )); then
       local remote
       remote=$(__cailoxo_remote_name)
       upstream_url=$(git config --get "remote.$remote.url" 2>/dev/null) || upstream_url=
       upstream=$(__cailoxo_upstream_provider "$upstream_url")
-      upstream_icon=$(__cailoxo_upstream_icon)
+      if (( __CAILOXO_FETCH_UPSTREAM_ICON )); then
+        upstream_icon=$(__cailoxo_upstream_icon)
+      fi
+      upstream_url=$(__cailoxo_clean_git_url "$upstream_url")
     fi
     __cailoxo_start_fetch
 
@@ -788,10 +910,10 @@ __CAILOXO_STATUS_CASES__    esac
     fi
 
     local first second prompt_style
-    first="$(__cailoxo_pansi "$__CAILOXO_OS_STYLE")$(__cailoxo_style_template "$os_text")$(__cailoxo_pansi "$__CAILOXO_RESET")$__CAILOXO_OS_TAIL"
-    first+="$(__cailoxo_pansi "$__CAILOXO_PATH_STYLE")$(__cailoxo_style_template "$path_text")$(__cailoxo_pansi "$__CAILOXO_RESET")$path_sep"
+    first="$(__cailoxo_osc7)$(__cailoxo_pansi "$__CAILOXO_OS_STYLE")$(__cailoxo_style_template "$os_text")$(__cailoxo_pansi "$__CAILOXO_RESET")$__CAILOXO_OS_TAIL"
+    first+="$(__cailoxo_pansi "$__CAILOXO_PATH_STYLE")$(__cailoxo_path_url_start)$(__cailoxo_style_template "$path_text")$(__cailoxo_path_url_end)$(__cailoxo_pansi "$__CAILOXO_RESET")$path_sep"
     if [[ -n $git_text ]]; then
-      first+="$(__cailoxo_pansi "$git_style")$(__cailoxo_style_template "$git_text")$(__cailoxo_pansi "$__CAILOXO_RESET")$git_sep"
+      first+="$(__cailoxo_pansi "$git_style")$(__cailoxo_git_url_start)$(__cailoxo_style_template "$git_text")$(__cailoxo_git_url_end)$(__cailoxo_pansi "$__CAILOXO_RESET")$git_sep"
     fi
 
     if (( last_status == 0 )); then
@@ -899,6 +1021,9 @@ mod tests {
         assert!(script.contains("__cailoxo_git_info"));
         assert!(script.contains("__cailoxo_style_template"));
         assert!(script.contains("__cailoxo_format_path"));
+        assert!(script.contains("__cailoxo_path_url_start"));
+        assert!(script.contains("__cailoxo_git_url_start"));
+        assert!(script.contains("typeset -gi __CAILOXO_OSC7=1"));
         assert!(script.contains("__cailoxo_start_fetch"));
         assert!(script.contains("text=${text//'<b>'/$bold_on}"));
         assert!(script.contains("zle-line-finish"));
