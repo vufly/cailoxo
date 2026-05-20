@@ -5,8 +5,8 @@ use anyhow::Result;
 use crate::config::{Config, Span};
 
 use super::shared::{
-    STATUSES, ansi_pair, color_escape, git_branch_icon, icon_pairs, layout, status_separator,
-    status_template,
+    Features, STATUSES, ansi_pair, color_escape, features as detect_features, git_branch_icon,
+    icon_pairs, layout, status_separator, status_template,
 };
 
 const RESET: &str = "\u{1b}[0m";
@@ -15,8 +15,11 @@ pub fn generate(config: &Config) -> Result<String> {
     let layout = layout(config)?;
     let os = layout.os;
     let path = layout.path;
-    let git = layout.git;
+    let Some(git) = layout.git else {
+        return generate_no_git(config);
+    };
     let prompt = layout.prompt_span;
+    let features = detect_features(config, &layout);
 
     let os_style = ansi_pair(os.foreground.as_ref(), os.background.as_ref())?;
     let path_style = ansi_pair(path.foreground.as_ref(), path.background.as_ref())?;
@@ -110,8 +113,9 @@ pub fn generate(config: &Config) -> Result<String> {
         &transient_ok_style,
         &transient_error_style,
         config.final_space,
+        &features,
     )?;
-    write_body(&mut script, transient_enabled)?;
+    write_body(&mut script, transient_enabled, &features)?;
     Ok(script)
 }
 
@@ -139,6 +143,7 @@ fn write_consts(
     transient_ok_style: &str,
     transient_error_style: &str,
     final_space: bool,
+    features: &Features,
 ) -> Result<()> {
     let min_dirs = path.setting_str("min_dirs").unwrap_or("1");
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
@@ -146,10 +151,9 @@ fn write_consts(
         || path.setting_bool("hyperlink").unwrap_or(false);
     let osc7 = path.setting_bool("osc7").unwrap_or(false);
     let branch_icon = git_branch_icon(git)?;
-    let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
-    let git_url =
-        git.setting_bool("url").unwrap_or(false) || git.setting_bool("hyperlink").unwrap_or(false);
-    let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
+    let fetch_upstream_icon = features.git_upstream_icon;
+    let git_url = features.git_url;
+    let fetch_remote = features.git_fetch;
     let fetch_remote_interval_ms = git
         .settings
         .get("fetch_remote_interval_ms")
@@ -190,6 +194,11 @@ fn write_consts(
     )?;
     write_var(out, "CAILOXO_BRANCH_ICON", &branch_icon)?;
     write_var(out, "CAILOXO_STATUS_SEPARATOR", status_separator(git))?;
+    writeln!(
+        out,
+        "$script:CAILOXO_GIT_STATUS = ${}",
+        if features.git_status { "true" } else { "false" }
+    )?;
     writeln!(
         out,
         "$script:CAILOXO_FETCH_UPSTREAM_ICON = ${}",
@@ -247,13 +256,305 @@ fn write_consts(
 
     write_status_templates(out, git)?;
     write_icon_map(out, "CAILOXO_OS_ICONS", "os", "nerdfont")?;
-    write_icon_map(out, "CAILOXO_UPSTREAM_ICONS", "git_upstream", "nerdfont")?;
+    if features.git_upstream_icon {
+        write_icon_map(out, "CAILOXO_UPSTREAM_ICONS", "git_upstream", "nerdfont")?;
+    }
     Ok(())
 }
 
 fn write_var(out: &mut String, name: &str, value: &str) -> Result<()> {
     writeln!(out, "$script:{name} = {}", ps_string(value))?;
     Ok(())
+}
+
+fn generate_no_git(config: &Config) -> Result<String> {
+    let layout = layout(config)?;
+    let features = detect_features(config, &layout);
+    let os = layout.os;
+    let path = layout.path;
+    let prompt = layout.prompt_span;
+    let os_style = ansi_pair(os.foreground.as_ref(), os.background.as_ref())?;
+    let path_style = ansi_pair(path.foreground.as_ref(), path.background.as_ref())?;
+    let os_tail = edge(
+        os.tail.as_deref(),
+        os.background.as_ref(),
+        path.background.as_ref(),
+        os.invert_tail,
+    )?;
+    let path_sep_last = edge(
+        path.separator.as_deref().or(path.tail.as_deref()),
+        path.background.as_ref(),
+        None,
+        path.invert_separator || path.invert_tail,
+    )?;
+    let prompt_ok_style = ansi_pair(prompt.success_foreground.as_ref(), None)?;
+    let prompt_error_style = ansi_pair(prompt.error_foreground.as_ref(), None)?;
+    let transient = config.transient.as_ref();
+    let transient_enabled = transient.is_some_and(|transient| transient.enabled);
+    let transient_template = transient
+        .map(|transient| transient.template.as_str())
+        .filter(|template| !template.is_empty())
+        .unwrap_or(&prompt.template);
+    let transient_ok_style = ansi_pair(
+        transient
+            .and_then(|transient| transient.success_foreground.as_ref())
+            .or(prompt.success_foreground.as_ref()),
+        transient.and_then(|transient| transient.background.as_ref()),
+    )?;
+    let transient_error_style = ansi_pair(
+        transient
+            .and_then(|transient| transient.error_foreground.as_ref())
+            .or(prompt.error_foreground.as_ref()),
+        transient.and_then(|transient| transient.background.as_ref()),
+    )?;
+
+    let mut out = String::new();
+    writeln!(out, "# Generated by cailoxo. Do not edit by hand.")?;
+    writeln!(out, "# shell: pwsh")?;
+    writeln!(out)?;
+    write_var(&mut out, "CAILOXO_OS_TEMPLATE", &os.template)?;
+    write_var(&mut out, "CAILOXO_PATH_TEMPLATE", &path.template)?;
+    write_var(&mut out, "CAILOXO_PROMPT_TEMPLATE", &prompt.template)?;
+    write_var(&mut out, "CAILOXO_TRANSIENT_TEMPLATE", transient_template)?;
+    write_var(
+        &mut out,
+        "CAILOXO_HOME_ICON",
+        path.setting_str("home_icon").unwrap_or("~"),
+    )?;
+    write_var(
+        &mut out,
+        "CAILOXO_FOLDER_ICON",
+        path.setting_str("folder_icon").unwrap_or("…"),
+    )?;
+    write_var(
+        &mut out,
+        "CAILOXO_EDGE_FORMAT",
+        path.setting_str("edge_format").unwrap_or(""),
+    )?;
+    if features.gitdir_format {
+        write_var(
+            &mut out,
+            "CAILOXO_GITDIR_FORMAT",
+            path.setting_str("gitdir_format").unwrap_or(""),
+        )?;
+    }
+    writeln!(
+        out,
+        "$script:CAILOXO_FINAL_SPACE = ${}",
+        if config.final_space { "true" } else { "false" }
+    )?;
+    write_var(&mut out, "CAILOXO_OS_STYLE", &os_style)?;
+    write_var(&mut out, "CAILOXO_PATH_STYLE", &path_style)?;
+    write_var(&mut out, "CAILOXO_RESET", RESET)?;
+    write_var(&mut out, "CAILOXO_OS_TAIL", &os_tail)?;
+    write_var(&mut out, "CAILOXO_PATH_SEP_LAST", &path_sep_last)?;
+    write_var(&mut out, "CAILOXO_PROMPT_OK_STYLE", &prompt_ok_style)?;
+    write_var(&mut out, "CAILOXO_PROMPT_ERROR_STYLE", &prompt_error_style)?;
+    write_var(&mut out, "CAILOXO_TRANSIENT_OK_STYLE", &transient_ok_style)?;
+    write_var(
+        &mut out,
+        "CAILOXO_TRANSIENT_ERROR_STYLE",
+        &transient_error_style,
+    )?;
+    write_icon_map(&mut out, "CAILOXO_OS_ICONS", "os", "nerdfont")?;
+
+    let style_body = ps_style_body(&features);
+    let plain_body = ps_plain_body(&features);
+    let template_body = ps_template_body(&features, &["icon", "path", "home_icon", "folder_icon"]);
+    let body = r#"
+function Cailoxo-Plain-Template {
+  param([string]$Text)
+__CAILOXO_PLAIN_BODY__
+}
+
+function Cailoxo-Style-Template {
+  param([string]$Text)
+__CAILOXO_STYLE_BODY__
+}
+
+function Cailoxo-Format-Part {
+  param([string]$Value, [string]$Format)
+  if ([string]::IsNullOrEmpty($Format)) { return $Value }
+  if ($Format.Contains('%s')) { return $Format.Replace('%s', $Value) }
+  $Value
+}
+
+function Cailoxo-Os-Icon {
+  $id = 'unknown'
+  if ($IsWindows) { $id = 'windows' } elseif ($IsMacOS) { $id = 'macos' } elseif (Test-Path '/etc/os-release') {
+    foreach ($line in Get-Content '/etc/os-release' -ErrorAction SilentlyContinue) { if ($line.StartsWith('ID=')) { $id = $line.Substring(3).Trim('"').ToLowerInvariant(); break } }
+  }
+  if ($script:CAILOXO_OS_ICONS.ContainsKey($id)) { return $script:CAILOXO_OS_ICONS[$id] }
+  $script:CAILOXO_OS_ICONS['unknown']
+}
+
+function Cailoxo-Normalize-Path { param([string]$Path) if ($null -eq $Path) { return '' }; $Path.Replace('\', '/') }
+function Cailoxo-Path-Separator { if ($IsWindows) { '\' } else { '/' } }
+__CAILOXO_GIT_ROOT_FUNCTION__
+
+function Cailoxo-Format-Path {
+  param([string]$Path, [string]$GitRoot)
+  $separator = Cailoxo-Path-Separator
+  $prefix = ''; $rest = $Path; $absolute = $false
+  if ($Path -eq '~') { return (Cailoxo-Format-Part $Path $script:CAILOXO_EDGE_FORMAT) } elseif ($Path.StartsWith('~/')) { $prefix = '~'; $rest = $Path.Substring(2) } elseif ($Path.StartsWith('…/')) { $prefix = '…'; $rest = $Path.Substring(2) } elseif ($Path.StartsWith('/')) { $absolute = $true; $rest = $Path.Substring(1) }
+  $parts = @($rest.Split([char[]]@('/'), [StringSplitOptions]::RemoveEmptyEntries))
+  if ($absolute -and $parts.Count -eq 0) { return (Cailoxo-Format-Part $separator $script:CAILOXO_EDGE_FORMAT) }
+  $out = @()
+  if ($prefix -ne '') { if ($prefix -eq '…') { $out += $prefix } else { $out += (Cailoxo-Format-Part $prefix $script:CAILOXO_EDGE_FORMAT) } }
+  for ($i = 0; $i -lt $parts.Count; $i++) { $raw = $parts[$i]; $part = $raw; if ($GitRoot -ne '' -and $raw -eq $GitRoot) { $part = Cailoxo-Format-Part $part $script:CAILOXO_GITDIR_FORMAT }; if ($i -eq ($parts.Count - 1) -or ($i -eq 0 -and $out.Count -eq 0)) { $part = Cailoxo-Format-Part $part $script:CAILOXO_EDGE_FORMAT }; $out += $part }
+  $joined = $out -join $separator
+  if ($absolute) { $separator + $joined } else { $joined }
+}
+
+function Cailoxo-Home-Path { if (-not [string]::IsNullOrEmpty($HOME)) { return (Cailoxo-Normalize-Path $HOME) }; Cailoxo-Normalize-Path ([Environment]::GetFolderPath('UserProfile')) }
+
+function Cailoxo-Shorten-Path {
+  param([int]$Budget)
+  $cwd = Cailoxo-Normalize-Path ((Get-Location).ProviderPath); $homePath = Cailoxo-Home-Path
+  if ([string]::Equals($cwd, $homePath, [StringComparison]::OrdinalIgnoreCase)) { $display = '~' } elseif ($homePath -ne '' -and $cwd.StartsWith($homePath + '/', [StringComparison]::OrdinalIgnoreCase)) { $display = '~' + $cwd.Substring($homePath.Length) } else { $display = $cwd }
+  if ($display.Length -le $Budget) { return $display }
+  if ($display.StartsWith('~/')) { $prefix = '~'; $rest = $display.Substring(2) } elseif ($display.StartsWith('/')) { $prefix = ''; $rest = $display.Substring(1) } else { $prefix = ''; $rest = $display }
+  $parts = @($rest.Split([char[]]@('/'), [StringSplitOptions]::RemoveEmptyEntries)); if ($parts.Count -eq 0) { return $display }
+  $current = $parts[$parts.Count - 1]; if ($Budget -le 4) { return "…/$current" }
+  if ($parts.Count -ge 2) { $candidate = "$(if ($prefix -ne '') { "$prefix/" })…/$($parts[$parts.Count - 2])/$current"; if ($candidate.Length -le $Budget) { return $candidate } }
+  $candidate = "$(if ($prefix -ne '') { "$prefix/" })…/$current"; if ($candidate.Length -le $Budget) { return $candidate }
+  "…/$current"
+}
+
+function Cailoxo-Apply-Template {
+  param([string]$Template, [hashtable]$Vars)
+  $tpl = $Template
+__CAILOXO_TEMPLATE_BODY__
+  $tpl
+}
+
+function Cailoxo-Path-Template {
+  param([hashtable]$Vars)
+  $marker = '{{ if home }}'
+  if (-not $script:CAILOXO_PATH_TEMPLATE.Contains($marker)) { return (Cailoxo-Apply-Template $script:CAILOXO_PATH_TEMPLATE $Vars) }
+  $start = $script:CAILOXO_PATH_TEMPLATE.IndexOf($marker); $before = $script:CAILOXO_PATH_TEMPLATE.Substring(0, $start); $rest = $script:CAILOXO_PATH_TEMPLATE.Substring($start + $marker.Length); $else = $rest.IndexOf('{{ else }}'); $end = $rest.IndexOf('{{ end }}')
+  if ($else -lt 0 -or $end -lt 0) { return (Cailoxo-Apply-Template $script:CAILOXO_PATH_TEMPLATE $Vars) }
+  $homePart = $rest.Substring(0, $else); $otherPart = $rest.Substring($else + '{{ else }}'.Length, $end - ($else + '{{ else }}'.Length)); $after = $rest.Substring($end + '{{ end }}'.Length); $body = if ($Vars['home']) { $homePart } else { $otherPart }
+  Cailoxo-Apply-Template ($before + $body + $after) $Vars
+}
+
+function Cailoxo-Render-Full {
+  param([int]$LastStatus)
+  $osText = Cailoxo-Apply-Template $script:CAILOXO_OS_TEMPLATE @{ icon = (Cailoxo-Os-Icon) }
+  $width = 80; try { $width = [Console]::WindowWidth } catch {}; if ($width -le 0) { $width = 80 }
+  $fixed = (Cailoxo-Plain-Template $osText).Length + $script:CAILOXO_HOME_ICON.Length + $script:CAILOXO_FOLDER_ICON.Length + 10
+__CAILOXO_GIT_ROOT_SET__
+  $path = Cailoxo-Format-Path (Cailoxo-Shorten-Path ([Math]::Max(1, $width - $fixed))) __CAILOXO_GIT_ROOT_ARG__
+  $homePath = Cailoxo-Home-Path; $isHome = [string]::Equals((Cailoxo-Normalize-Path ((Get-Location).ProviderPath)), $homePath, [StringComparison]::OrdinalIgnoreCase)
+  $pathText = Cailoxo-Path-Template @{ path = $path; home = $isHome; home_icon = $script:CAILOXO_HOME_ICON; folder_icon = $script:CAILOXO_FOLDER_ICON }
+  $promptStyle = if ($LastStatus -eq 0) { $script:CAILOXO_PROMPT_OK_STYLE } else { $script:CAILOXO_PROMPT_ERROR_STYLE }
+  $suffix = if ($script:CAILOXO_FINAL_SPACE) { ' ' } else { '' }
+  $script:CAILOXO_OS_STYLE + (Cailoxo-Style-Template $osText) + $script:CAILOXO_RESET + $script:CAILOXO_OS_TAIL + $script:CAILOXO_PATH_STYLE + (Cailoxo-Style-Template $pathText) + $script:CAILOXO_RESET + $script:CAILOXO_PATH_SEP_LAST + "`n" + $promptStyle + (Cailoxo-Style-Template $script:CAILOXO_PROMPT_TEMPLATE) + $script:CAILOXO_RESET + $suffix
+}
+
+function Cailoxo-Render-Transient { param([int]$LastStatus) $promptStyle = if ($LastStatus -eq 0) { $script:CAILOXO_TRANSIENT_OK_STYLE } else { $script:CAILOXO_TRANSIENT_ERROR_STYLE }; $promptStyle + (Cailoxo-Style-Template $script:CAILOXO_TRANSIENT_TEMPLATE) + $script:CAILOXO_RESET }
+
+function prompt { $originalSuccess = $?; $originalLastExitCode = $global:LASTEXITCODE; $lastStatus = if ($originalSuccess) { 0 } elseif ($null -ne $originalLastExitCode) { [int]$originalLastExitCode } else { 1 }; $output = Cailoxo-Render-Full $lastStatus; try { Set-PSReadLineOption -ExtraPromptLineCount ((($output -split "`n").Count) - 1) } catch {}; $global:LASTEXITCODE = $originalLastExitCode; $output }
+"#;
+    out.push_str(
+        &body
+            .replace("__CAILOXO_STYLE_BODY__", &style_body)
+            .replace("__CAILOXO_PLAIN_BODY__", &plain_body)
+            .replace("__CAILOXO_TEMPLATE_BODY__", &template_body)
+            .replace(
+                "__CAILOXO_GIT_ROOT_FUNCTION__",
+                if features.gitdir_format {
+                    r#"
+function Cailoxo-Git-Root-Name {
+  $root = & git rev-parse --show-toplevel 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($root -join ''))) { return '' }
+  Split-Path -Leaf (($root -join "`n").Trim())
+}
+"#
+                } else {
+                    ""
+                },
+            )
+            .replace(
+                "__CAILOXO_GIT_ROOT_SET__",
+                if features.gitdir_format {
+                    "  $gitRoot = Cailoxo-Git-Root-Name"
+                } else {
+                    ""
+                },
+            )
+            .replace(
+                "__CAILOXO_GIT_ROOT_ARG__",
+                if features.gitdir_format {
+                    "$gitRoot"
+                } else {
+                    "''"
+                },
+            ),
+    );
+    if transient_enabled {
+        out.push_str(
+            r#"
+function Set-CailoxoTransientPrompt { try { [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt() } catch {} }
+try { Set-PSReadLineKeyHandler -Key Enter -BriefDescription 'CailoxoEnterKeyHandler' -ScriptBlock { try { Set-CailoxoTransientPrompt } finally { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() } } } catch {}
+"#,
+        );
+    }
+    Ok(out)
+}
+
+fn ps_style_body(features: &Features) -> String {
+    let mut out = String::from("  $esc = [char]27\n  $Text");
+    for tag in &features.tags {
+        write!(
+            out,
+            ".Replace({}, \"$esc{}\").Replace({}, \"$esc{}\")",
+            ps_string(tag.open),
+            tag.on.trim_start_matches("\\e"),
+            ps_string(tag.close),
+            tag.off.trim_start_matches("\\e")
+        )
+        .unwrap();
+    }
+    out.push('\n');
+    out
+}
+
+fn ps_plain_body(features: &Features) -> String {
+    let mut out = String::from("  $Text");
+    for tag in &features.tags {
+        write!(
+            out,
+            ".Replace({}, '').Replace({}, '')",
+            ps_string(tag.open),
+            ps_string(tag.close)
+        )
+        .unwrap();
+    }
+    out.push('\n');
+    out
+}
+
+fn ps_template_body(features: &Features, names: &[&str]) -> String {
+    let mut out = String::new();
+    for name in names {
+        let enabled = match *name {
+            "icon" => features.var_icon,
+            "path" => features.var_path,
+            "home_icon" => features.var_home_icon,
+            "folder_icon" => features.var_folder_icon,
+            _ => false,
+        };
+        if enabled {
+            writeln!(
+                out,
+                "  if ($Vars.ContainsKey('{0}')) {{ $tpl = $tpl.Replace('{{{{ {0} }}}}', [string]$Vars['{0}']) }}",
+                name
+            )
+            .unwrap();
+        }
+    }
+    out
 }
 
 fn write_status_templates(out: &mut String, git: &Span) -> Result<()> {
@@ -279,7 +580,9 @@ fn write_icon_map(out: &mut String, name: &str, group: &str, set: &str) -> Resul
     Ok(())
 }
 
-fn write_body(out: &mut String, transient_enabled: bool) -> Result<()> {
+fn write_body(out: &mut String, transient_enabled: bool, features: &Features) -> Result<()> {
+    let style_body = ps_style_body(features);
+    let plain_body = ps_plain_body(features);
     let body = r#"
 $script:CAILOXO_PROMPT_TYPE = 'primary'
 $script:CAILOXO_FETCH_PROCESS = $null
@@ -296,13 +599,12 @@ $script:CAILOXO_FETCH_READY = $false
 
 function Cailoxo-Plain-Template {
   param([string]$Text)
-  $Text.Replace('<b>', '').Replace('</b>', '').Replace('<u>', '').Replace('</u>', '').Replace('<o>', '').Replace('</o>', '').Replace('<i>', '').Replace('</i>', '').Replace('<s>', '').Replace('</s>', '').Replace('<d>', '').Replace('</d>', '').Replace('<f>', '').Replace('</f>', '').Replace('<r>', '').Replace('</r>', '')
+__CAILOXO_PLAIN_BODY__
 }
 
 function Cailoxo-Style-Template {
   param([string]$Text)
-  $esc = [char]27
-  $Text.Replace('<b>', "$esc[1m").Replace('</b>', "$esc[22m").Replace('<u>', "$esc[4m").Replace('</u>', "$esc[24m").Replace('<o>', "$esc[53m").Replace('</o>', "$esc[55m").Replace('<i>', "$esc[3m").Replace('</i>', "$esc[23m").Replace('<s>', "$esc[9m").Replace('</s>', "$esc[29m").Replace('<d>', "$esc[2m").Replace('</d>', "$esc[22m").Replace('<f>', "$esc[5m").Replace('</f>', "$esc[25m").Replace('<r>', "$esc[7m").Replace('</r>', "$esc[27m")
+__CAILOXO_STYLE_BODY__
 }
 
 function Cailoxo-Format-Part {
@@ -736,6 +1038,7 @@ function Cailoxo-Git-Info {
   if ($branch -eq '') { return $empty }
   $upstream = Cailoxo-Upstream-Info $branch
   Cailoxo-Start-Fetch $branch
+  if (-not $script:CAILOXO_GIT_STATUS) { return @{ branch = $branch; status = ''; dirty = $false; upstream = $upstream.upstream; upstream_icon = $upstream.upstream_icon; upstream_url = $upstream.upstream_url } }
 
   $counts = @{ ahead = 0; behind = 0; conflicted = 0; untracked = 0; modified = 0; staged = 0; renamed = 0; deleted = 0; stashed = 0 }
   $status = & git status --porcelain=v1 2>$null
@@ -821,7 +1124,11 @@ function prompt {
   $output
 }
 "#;
-    out.push_str(body);
+    out.push_str(
+        &body
+            .replace("__CAILOXO_STYLE_BODY__", &style_body)
+            .replace("__CAILOXO_PLAIN_BODY__", &plain_body),
+    );
 
     if transient_enabled {
         out.push_str(
@@ -892,4 +1199,112 @@ mod tests {
         assert!(script.contains("Set-PSReadLineKeyHandler"));
         assert!(script.contains("function prompt"));
     }
+
+    #[test]
+    fn pwsh_no_git_span_omits_git_runtime() {
+        let config = Config::parse(NO_GIT_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(!script.contains("Cailoxo-Git-Info"));
+        assert!(!script.contains("git status"));
+        assert!(!script.contains("git rev-parse"));
+        assert!(!script.contains("Cailoxo-Start-Fetch"));
+    }
+
+    #[test]
+    fn pwsh_no_git_span_keeps_gitdir_probe_when_format_used() {
+        let config = Config::parse(NO_GIT_GITDIR_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(script.contains("function Cailoxo-Git-Root-Name"));
+        assert!(script.contains("git rev-parse --show-toplevel"));
+        assert!(!script.contains("Cailoxo-Git-Info"));
+        assert!(!script.contains("git status"));
+    }
+
+    #[test]
+    fn pwsh_omits_upstream_icon_map_when_unused() {
+        let config = Config::parse(BRANCH_ONLY_GIT_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(!script.contains("$script:CAILOXO_UPSTREAM_ICONS = @{"));
+    }
+
+    const NO_GIT_CONFIG: &str = r#"
+version = 1
+final_space = true
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+success_foreground = "2"
+error_foreground = "1"
+"#;
+
+    const BRANCH_ONLY_GIT_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line.span]]
+type = "git"
+template = " {{ branch }} "
+background = "2"
+separator = ">"
+
+[line.span.settings]
+fetch_upstream_icon = true
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
+
+    const NO_GIT_GITDIR_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[line.span.settings]
+gitdir_format = "<b>%s</b>"
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
 }

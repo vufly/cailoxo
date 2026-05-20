@@ -5,9 +5,9 @@ use anyhow::Result;
 use crate::config::{Config, Span};
 
 use super::shared::{
-    ansi_pair, color_escape, git_branch_icon, layout, shell_single_quote, status_separator,
-    zsh_os_icon_cases, zsh_os_unknown_icon, zsh_prompt_ansi, zsh_prompt_single_quote,
-    zsh_status_template_cases, zsh_upstream_icon_cases,
+    Features, ansi_pair, color_escape, features as detect_features, git_branch_icon, layout,
+    shell_single_quote, status_separator, zsh_os_icon_cases, zsh_os_unknown_icon, zsh_prompt_ansi,
+    zsh_prompt_single_quote, zsh_status_template_cases, zsh_upstream_icon_cases,
 };
 
 const RESET: &str = "\u{1b}[0m";
@@ -18,20 +18,29 @@ pub fn generate(config: &Config) -> Result<String> {
     let path = layout.path;
     let git = layout.git;
     let prompt = layout.prompt_span;
+    let features = detect_features(config, &layout);
 
     let os_style = zsh_ansi(&ansi_pair(os.foreground.as_ref(), os.background.as_ref())?);
     let path_style = zsh_ansi(&ansi_pair(
         path.foreground.as_ref(),
         path.background.as_ref(),
     )?);
-    let git_clean_style = zsh_ansi(&ansi_pair(
-        git.foreground.as_ref(),
-        git.background.as_ref(),
-    )?);
-    let git_dirty_style = zsh_ansi(&ansi_pair(
-        git.foreground.as_ref(),
-        git.dirty_background.as_ref().or(git.background.as_ref()),
-    )?);
+    let git_clean_style = if let Some(git) = git {
+        zsh_ansi(&ansi_pair(
+            git.foreground.as_ref(),
+            git.background.as_ref(),
+        )?)
+    } else {
+        String::new()
+    };
+    let git_dirty_style = if let Some(git) = git {
+        zsh_ansi(&ansi_pair(
+            git.foreground.as_ref(),
+            git.dirty_background.as_ref().or(git.background.as_ref()),
+        )?)
+    } else {
+        String::new()
+    };
     let reset = zsh_ansi(RESET);
 
     let os_tail = edge(
@@ -43,13 +52,13 @@ pub fn generate(config: &Config) -> Result<String> {
     let path_sep_clean = edge(
         path.separator.as_deref(),
         path.background.as_ref(),
-        git.background.as_ref(),
+        git.and_then(|git| git.background.as_ref()),
         path.invert_separator,
     )?;
     let path_sep_dirty = edge(
         path.separator.as_deref(),
         path.background.as_ref(),
-        git.dirty_background.as_ref().or(git.background.as_ref()),
+        git.and_then(|git| git.dirty_background.as_ref().or(git.background.as_ref())),
         path.invert_separator,
     )?;
     let path_sep_last = edge(
@@ -59,16 +68,16 @@ pub fn generate(config: &Config) -> Result<String> {
         path.invert_separator || path.invert_tail,
     )?;
     let git_sep_clean = edge(
-        git.separator.as_deref(),
-        git.background.as_ref(),
+        git.and_then(|git| git.separator.as_deref()),
+        git.and_then(|git| git.background.as_ref()),
         None,
-        git.invert_separator,
+        git.is_some_and(|git| git.invert_separator),
     )?;
     let git_sep_dirty = edge(
-        git.separator.as_deref(),
-        git.dirty_background.as_ref().or(git.background.as_ref()),
+        git.and_then(|git| git.separator.as_deref()),
+        git.and_then(|git| git.dirty_background.as_ref().or(git.background.as_ref())),
         None,
-        git.invert_separator,
+        git.is_some_and(|git| git.invert_separator),
     )?;
 
     let prompt_ok_style = zsh_ansi(&ansi_pair(prompt.success_foreground.as_ref(), None)?);
@@ -123,8 +132,9 @@ pub fn generate(config: &Config) -> Result<String> {
         &transient_ok_style,
         &transient_error_style,
         config.final_space,
+        &features,
     )?;
-    write_body(&mut script, git, transient_enabled)?;
+    write_body(&mut script, git, transient_enabled, &features)?;
     writeln!(script, "fi")?;
     Ok(script)
 }
@@ -134,7 +144,7 @@ fn write_consts(
     out: &mut String,
     os: &Span,
     path: &Span,
-    git: &Span,
+    git: Option<&Span>,
     prompt: &Span,
     transient_template: &str,
     os_style: &str,
@@ -153,28 +163,27 @@ fn write_consts(
     transient_ok_style: &str,
     transient_error_style: &str,
     final_space: bool,
+    features: &Features,
 ) -> Result<()> {
     let min_dirs = path.setting_str("min_dirs").unwrap_or("1");
     let min_dirs = min_dirs.parse::<usize>().unwrap_or(1);
     let path_url = path.setting_bool("url").unwrap_or(false)
         || path.setting_bool("hyperlink").unwrap_or(false);
     let osc7 = path.setting_bool("osc7").unwrap_or(false);
-    let branch_icon = git_branch_icon(git)?;
-    let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
-    let git_url =
-        git.setting_bool("url").unwrap_or(false) || git.setting_bool("hyperlink").unwrap_or(false);
-    let fetch_remote = git.setting_bool("fetch_remote").unwrap_or(false);
+    let branch_icon = if let Some(git) = git {
+        git_branch_icon(git)?
+    } else {
+        String::new()
+    };
     let fetch_remote_interval_s = git
-        .settings
-        .get("fetch_remote_interval_ms")
+        .and_then(|git| git.settings.get("fetch_remote_interval_ms"))
         .and_then(|value| value.as_integer())
         .unwrap_or(60_000)
         .max(0)
         .saturating_add(999)
         / 1000;
     let fetch_remote_timeout_s = git
-        .settings
-        .get("fetch_remote_timeout_ms")
+        .and_then(|git| git.settings.get("fetch_remote_timeout_ms"))
         .and_then(|value| value.as_integer())
         .unwrap_or(5_000)
         .max(1)
@@ -191,11 +200,13 @@ fn write_consts(
         "  typeset -g __CAILOXO_PATH_TEMPLATE={}",
         zsh_prompt_single_quote(&path.template)
     )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_GIT_TEMPLATE={}",
-        zsh_prompt_single_quote(&git.template)
-    )?;
+    if let Some(git) = git {
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_GIT_TEMPLATE={}",
+            zsh_prompt_single_quote(&git.template)
+        )?;
+    }
     writeln!(
         out,
         "  typeset -g __CAILOXO_PROMPT_TEMPLATE={}",
@@ -226,39 +237,50 @@ fn write_consts(
         "  typeset -g __CAILOXO_GITDIR_FORMAT={}",
         shell_single_quote(path.setting_str("gitdir_format").unwrap_or(""))
     )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_BRANCH_ICON={}",
-        zsh_prompt_single_quote(&branch_icon)
-    )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_STATUS_SEPARATOR={}",
-        shell_single_quote(status_separator(git))
-    )?;
-    writeln!(
-        out,
-        "  typeset -gi __CAILOXO_FETCH_UPSTREAM_ICON={}",
-        usize::from(fetch_upstream_icon)
-    )?;
-    writeln!(
-        out,
-        "  typeset -gi __CAILOXO_GIT_URL={}",
-        usize::from(git_url)
-    )?;
-    writeln!(
-        out,
-        "  typeset -gi __CAILOXO_FETCH_REMOTE={}",
-        usize::from(fetch_remote)
-    )?;
-    writeln!(
-        out,
-        "  typeset -gi __CAILOXO_FETCH_REMOTE_INTERVAL_S={fetch_remote_interval_s}"
-    )?;
-    writeln!(
-        out,
-        "  typeset -gi __CAILOXO_FETCH_REMOTE_TIMEOUT_S={fetch_remote_timeout_s}"
-    )?;
+    if let Some(git) = git {
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_BRANCH_ICON={}",
+            zsh_prompt_single_quote(&branch_icon)
+        )?;
+        if features.git_status {
+            writeln!(
+                out,
+                "  typeset -g __CAILOXO_STATUS_SEPARATOR={}",
+                shell_single_quote(status_separator(git))
+            )?;
+        }
+        writeln!(
+            out,
+            "  typeset -gi __CAILOXO_GIT_STATUS={}",
+            usize::from(features.git_status)
+        )?;
+        writeln!(
+            out,
+            "  typeset -gi __CAILOXO_FETCH_UPSTREAM_ICON={}",
+            usize::from(features.git_upstream_icon)
+        )?;
+        writeln!(
+            out,
+            "  typeset -gi __CAILOXO_GIT_URL={}",
+            usize::from(features.git_url)
+        )?;
+        writeln!(
+            out,
+            "  typeset -gi __CAILOXO_FETCH_REMOTE={}",
+            usize::from(features.git_fetch)
+        )?;
+        if features.git_fetch {
+            writeln!(
+                out,
+                "  typeset -gi __CAILOXO_FETCH_REMOTE_INTERVAL_S={fetch_remote_interval_s}"
+            )?;
+            writeln!(
+                out,
+                "  typeset -gi __CAILOXO_FETCH_REMOTE_TIMEOUT_S={fetch_remote_timeout_s}"
+            )?;
+        }
+    }
     writeln!(out, "  typeset -gi __CAILOXO_MIN_DIRS={min_dirs}")?;
     writeln!(
         out,
@@ -273,16 +295,18 @@ fn write_consts(
     writeln!(out, "  typeset -gi __CAILOXO_OSC7={}", usize::from(osc7))?;
     writeln!(out, "  typeset -g __CAILOXO_OS_STYLE=$'{}'", os_style)?;
     writeln!(out, "  typeset -g __CAILOXO_PATH_STYLE=$'{}'", path_style)?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_GIT_CLEAN_STYLE=$'{}'",
-        git_clean_style
-    )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_GIT_DIRTY_STYLE=$'{}'",
-        git_dirty_style
-    )?;
+    if git.is_some() {
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_GIT_CLEAN_STYLE=$'{}'",
+            git_clean_style
+        )?;
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_GIT_DIRTY_STYLE=$'{}'",
+            git_dirty_style
+        )?;
+    }
     writeln!(out, "  typeset -g __CAILOXO_RESET=$'{}'", reset)?;
     writeln!(out, "  typeset -g __CAILOXO_OS_TAIL=$'{}'", os_tail)?;
     writeln!(
@@ -300,16 +324,18 @@ fn write_consts(
         "  typeset -g __CAILOXO_PATH_SEP_LAST=$'{}'",
         path_sep_last
     )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_GIT_SEP_CLEAN=$'{}'",
-        git_sep_clean
-    )?;
-    writeln!(
-        out,
-        "  typeset -g __CAILOXO_GIT_SEP_DIRTY=$'{}'",
-        git_sep_dirty
-    )?;
+    if git.is_some() {
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_GIT_SEP_CLEAN=$'{}'",
+            git_sep_clean
+        )?;
+        writeln!(
+            out,
+            "  typeset -g __CAILOXO_GIT_SEP_DIRTY=$'{}'",
+            git_sep_dirty
+        )?;
+    }
     writeln!(
         out,
         "  typeset -g __CAILOXO_PROMPT_OK_STYLE=$'{}'",
@@ -333,11 +359,149 @@ fn write_consts(
     Ok(())
 }
 
-fn write_body(out: &mut String, git: &Span, transient_enabled: bool) -> Result<()> {
-    let status_cases = zsh_status_template_cases(git)?;
+fn zsh_template_conditionals(features: &Features) -> String {
+    if !features.if_status {
+        return String::new();
+    }
+    r#"    local before rest body after then_part else_part
+    while [[ $tpl == *'{{ if status }}'* ]]; do
+      before=${tpl%%'{{ if status }}'*}
+      rest=${tpl#*'{{ if status }}'}
+      body=${rest%%'{{ end }}'*}
+      after=${rest#*'{{ end }}'}
+      if [[ $body == *'{{ else }}'* ]]; then
+        then_part=${body%%'{{ else }}'*}
+        else_part=${body#*'{{ else }}'}
+      else
+        then_part=$body
+        else_part=
+      fi
+      if [[ -n $git_status ]]; then
+        tpl="${before}${then_part}${after}"
+      else
+        tpl="${before}${else_part}${after}"
+      fi
+    done
+"#
+    .to_string()
+}
+
+fn zsh_template_replacements(features: &Features) -> String {
+    let vars = [
+        (features.var_icon, "icon", "os_icon"),
+        (features.var_path, "path", "render_path"),
+        (features.var_home_icon, "home_icon", "home_icon"),
+        (features.var_folder_icon, "folder_icon", "folder_icon"),
+        (features.var_status, "status", "git_status"),
+        (features.var_branch_icon, "branch_icon", "branch_icon"),
+        (features.var_upstream_icon, "upstream_icon", "upstream_icon"),
+        (features.var_upstream, "upstream", "upstream"),
+        (features.var_upstream_url, "upstream_url", "upstream_url"),
+        (features.var_branch, "branch", "branch"),
+    ];
+    let mut out = String::new();
+    for (enabled, name, shell_var) in vars {
+        if enabled {
+            writeln!(
+                out,
+                "    tpl=${{tpl//\\{{\\{{ {name} \\}}\\}}/${{{shell_var}}}}}"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    tpl=${{tpl//\\{{\\{{{name}\\}}\\}}/${{{shell_var}}}}}"
+            )
+            .unwrap();
+        }
+    }
+    out
+}
+
+fn zsh_style_locals(features: &Features) -> String {
+    if features.tags.is_empty() {
+        return String::new();
+    }
+    let names = features
+        .tags
+        .iter()
+        .map(|tag| format!("{}_on {}_off", tag.zsh_name, tag.zsh_name))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("    local {names}\n")
+}
+
+fn zsh_style_init(features: &Features) -> String {
+    let mut out = String::new();
+    for tag in &features.tags {
+        writeln!(
+            out,
+            "    {0}_on=$(__cailoxo_pansi $'{1}')\n    {0}_off=$(__cailoxo_pansi $'{2}')",
+            tag.zsh_name, tag.on, tag.off
+        )
+        .unwrap();
+    }
+    out
+}
+
+fn zsh_style_replacements(features: &Features) -> String {
+    let mut out = String::new();
+    for tag in &features.tags {
+        let close = tag.close.replace('/', "\\/");
+        writeln!(
+            out,
+            "    text=${{text//'{}'/${}_on}}",
+            tag.open, tag.zsh_name
+        )
+        .unwrap();
+        writeln!(out, "    text=${{text//'{}'/${}_off}}", close, tag.zsh_name).unwrap();
+    }
+    out
+}
+
+fn zsh_plain_replacements(features: &Features) -> String {
+    let mut out = String::new();
+    for tag in &features.tags {
+        let close = tag.close.replace('/', "\\/");
+        writeln!(out, "    text=${{text//'{}'/}}", tag.open).unwrap();
+        writeln!(out, "    text=${{text//'{}'/}}", close).unwrap();
+    }
+    out
+}
+
+fn write_body_no_git(out: &mut String, transient_enabled: bool, features: &Features) -> Result<()> {
     let os_cases = zsh_os_icon_cases()?;
     let os_unknown = zsh_os_unknown_icon()?;
-    let upstream_cases = zsh_upstream_icon_cases()?;
+    let template_replacements = zsh_template_replacements(features);
+    let style_locals = zsh_style_locals(features);
+    let style_init = zsh_style_init(features);
+    let style_replacements = zsh_style_replacements(features);
+    let plain_replacements = zsh_plain_replacements(features);
+    let git_root_function = if features.gitdir_format {
+        r#"  __cailoxo_git_root_name() {
+    local root
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+    print -r -- "${root:t}"
+  }
+
+"#
+    } else {
+        ""
+    };
+    let git_root_local = if features.gitdir_format {
+        " git_root_name"
+    } else {
+        ""
+    };
+    let git_root_set = if features.gitdir_format {
+        "    git_root_name=$(__cailoxo_git_root_name)\n"
+    } else {
+        ""
+    };
+    let git_root_arg = if features.gitdir_format {
+        " \"$git_root_name\""
+    } else {
+        ""
+    };
     let body = r#"
   __cailoxo_pansi() {
     print -nr -- "%{${1}%}"
@@ -345,61 +509,298 @@ fn write_body(out: &mut String, git: &Span, transient_enabled: bool) -> Result<(
 
   __cailoxo_style_template() {
     local text=$1
-    local bold_on bold_off underline_on underline_off overline_on overline_off italic_on italic_off
-    local strike_on strike_off dim_on dim_off blink_on blink_off reverse_on reverse_off
-    bold_on=$(__cailoxo_pansi $'\e[1m')
-    bold_off=$(__cailoxo_pansi $'\e[22m')
-    underline_on=$(__cailoxo_pansi $'\e[4m')
-    underline_off=$(__cailoxo_pansi $'\e[24m')
-    overline_on=$(__cailoxo_pansi $'\e[53m')
-    overline_off=$(__cailoxo_pansi $'\e[55m')
-    italic_on=$(__cailoxo_pansi $'\e[3m')
-    italic_off=$(__cailoxo_pansi $'\e[23m')
-    strike_on=$(__cailoxo_pansi $'\e[9m')
-    strike_off=$(__cailoxo_pansi $'\e[29m')
-    dim_on=$(__cailoxo_pansi $'\e[2m')
-    dim_off=$(__cailoxo_pansi $'\e[22m')
-    blink_on=$(__cailoxo_pansi $'\e[5m')
-    blink_off=$(__cailoxo_pansi $'\e[25m')
-    reverse_on=$(__cailoxo_pansi $'\e[7m')
-    reverse_off=$(__cailoxo_pansi $'\e[27m')
-    text=${text//'<b>'/$bold_on}
-    text=${text//'<\/b>'/$bold_off}
-    text=${text//'<u>'/$underline_on}
-    text=${text//'<\/u>'/$underline_off}
-    text=${text//'<o>'/$overline_on}
-    text=${text//'<\/o>'/$overline_off}
-    text=${text//'<i>'/$italic_on}
-    text=${text//'<\/i>'/$italic_off}
-    text=${text//'<s>'/$strike_on}
-    text=${text//'<\/s>'/$strike_off}
-    text=${text//'<d>'/$dim_on}
-    text=${text//'<\/d>'/$dim_off}
-    text=${text//'<f>'/$blink_on}
-    text=${text//'<\/f>'/$blink_off}
-    text=${text//'<r>'/$reverse_on}
-    text=${text//'<\/r>'/$reverse_off}
+__CAILOXO_STYLE_LOCALS____CAILOXO_STYLE_INIT____CAILOXO_STYLE_REPLACEMENTS__
     print -r -- "$text"
   }
 
   __cailoxo_plain_template() {
     local text=$1
-    text=${text//'<b>'/}
-    text=${text//'<\/b>'/}
-    text=${text//'<u>'/}
-    text=${text//'<\/u>'/}
-    text=${text//'<o>'/}
-    text=${text//'<\/o>'/}
-    text=${text//'<i>'/}
-    text=${text//'<\/i>'/}
-    text=${text//'<s>'/}
-    text=${text//'<\/s>'/}
-    text=${text//'<d>'/}
-    text=${text//'<\/d>'/}
-    text=${text//'<f>'/}
-    text=${text//'<\/f>'/}
-    text=${text//'<r>'/}
-    text=${text//'<\/r>'/}
+__CAILOXO_PLAIN_REPLACEMENTS__
+    print -r -- "$text"
+  }
+
+  __cailoxo_url_escape() {
+    local value=${1//\\//}
+    value=${value//\%/%25}
+    value=${value// /%20}
+    value=${value//\#/%23}
+    value=${value//\?/%3F}
+    value=${value//\;/%3B}
+    print -r -- "$value"
+  }
+
+  __cailoxo_file_url() {
+    local path=$(__cailoxo_url_escape "$PWD") host=${HOST:-$(hostname 2>/dev/null)}
+    if [[ $path == [[:alpha:]]:/* ]]; then
+      print -r -- "file:///$path"
+    else
+      print -r -- "file://$host$path"
+    fi
+  }
+
+  __cailoxo_osc7() {
+    (( __CAILOXO_OSC7 )) || return
+    local url=$(__cailoxo_file_url)
+    [[ -n $url ]] && __cailoxo_pansi $'\e]7;'"$url"$'\e\\'
+  }
+
+  __cailoxo_path_url_start() {
+    (( __CAILOXO_PATH_URL )) || return
+    local url=$(__cailoxo_file_url)
+    [[ -n $url ]] && __cailoxo_pansi $'\e]8;;'"$url"$'\e\\'
+  }
+
+  __cailoxo_path_url_end() {
+    (( __CAILOXO_PATH_URL )) || return
+    __cailoxo_pansi $'\e]8;;\e\\'
+  }
+
+  __cailoxo_format_part() {
+    local value=$1 format=$2
+    [[ -n $format ]] || { print -r -- "$value"; return }
+    [[ $format == *%s* ]] || { print -r -- "$value"; return }
+    print -r -- "${format//\%s/$value}"
+  }
+
+  __cailoxo_format_path() {
+    local input=$1 git_root=$2 prefix= rest absolute=0
+    if [[ $input == '~' ]]; then
+      __cailoxo_format_part "$input" "$__CAILOXO_EDGE_FORMAT"
+      return
+    elif [[ $input == '~/'* ]]; then
+      prefix='~'
+      rest=${input#\~/}
+    elif [[ $input == '…/'* ]]; then
+      prefix='…'
+      rest=${input#…/}
+    elif [[ $input == /* ]]; then
+      absolute=1
+      rest=${input#/}
+    else
+      rest=$input
+    fi
+    local -a raw_parts parts out
+    raw_parts=("${(@s:/:)rest}")
+    local part i
+    for part in "${raw_parts[@]}"; do
+      [[ -n $part ]] && parts+=("$part")
+    done
+    if (( absolute )) && (( ${#parts} == 0 )); then
+      __cailoxo_format_part / "$__CAILOXO_EDGE_FORMAT"
+      return
+    fi
+    if [[ -n $prefix ]]; then
+      if [[ $prefix == '…' ]]; then out+=("$prefix"); else out+=("$(__cailoxo_format_part "$prefix" "$__CAILOXO_EDGE_FORMAT")"); fi
+    fi
+    for (( i = 1; i <= ${#parts}; i++ )); do
+      part=$parts[$i]
+      if [[ -n $git_root && $part == $git_root ]]; then
+        part=$(__cailoxo_format_part "$part" "$__CAILOXO_GITDIR_FORMAT")
+      fi
+      if (( i == ${#parts} || (i == 1 && ${#out} == 0) )); then
+        part=$(__cailoxo_format_part "$part" "$__CAILOXO_EDGE_FORMAT")
+      fi
+      out+=("$part")
+    done
+    local joined=${(j:/:)out}
+    (( absolute )) && joined="/$joined"
+    print -r -- "$joined"
+  }
+
+__CAILOXO_GIT_ROOT_FUNCTION__
+  __cailoxo_os_icon() {
+    local id=unknown
+    if [[ -r /etc/os-release ]]; then
+      local line
+      while IFS='=' read -r key value; do
+        [[ $key == ID ]] || continue
+        id=${value//\"/}
+        break
+      done < /etc/os-release
+    elif [[ $OSTYPE == darwin* ]]; then
+      id=macos
+    elif [[ $OSTYPE == msys* || $OSTYPE == cygwin* ]]; then
+      id=windows
+    fi
+    case ${id:l} in
+__CAILOXO_OS_CASES__      *) print -r -- __CAILOXO_OS_UNKNOWN__ ;;
+    esac
+  }
+
+  __cailoxo_apply_template() {
+    local tpl=$1
+__CAILOXO_TEMPLATE_REPLACEMENTS__
+    print -r -- $tpl
+  }
+
+  __cailoxo_path_template() {
+    local tpl=$__CAILOXO_PATH_TEMPLATE
+    local before=${tpl%%'{{ if home }}'*}
+    local rest=${tpl#*'{{ if home }}'}
+    if [[ $rest == $tpl ]]; then
+      __cailoxo_apply_template "$tpl"
+      return
+    fi
+    local home_part=${rest%%'{{ else }}'*}
+    rest=${rest#*'{{ else }}'}
+    local other_part=${rest%%'{{ end }}'*}
+    local after=${rest#*'{{ end }}'}
+    if [[ $is_home == 1 ]]; then
+      __cailoxo_apply_template "${before}${home_part}${after}"
+    else
+      __cailoxo_apply_template "${before}${other_part}${after}"
+    fi
+  }
+
+  __cailoxo_shorten_path() {
+    local budget=$1 display
+    if [[ $PWD == $HOME ]]; then display='~'; elif [[ $PWD == $HOME/* ]]; then display="~${PWD#$HOME}"; else display=$PWD; fi
+    if (( ${#display} <= budget )); then print -r -- $display; return; fi
+    local prefix rest
+    if [[ $display == ~/* ]]; then prefix='~'; rest=${display#\~/}; elif [[ $display == /* ]]; then prefix=''; rest=${display#/}; else prefix=''; rest=$display; fi
+    local -a parts
+    parts=(${(s:/:)rest})
+    local count=${#parts}
+    if (( count == 0 )); then print -r -- $display; return; fi
+    local current=$parts[-1]
+    if (( budget <= 4 )); then print -r -- "…/$current"; return; fi
+    local candidate
+    if (( count >= 2 )); then
+      candidate="${prefix:+$prefix/}…/$parts[-2]/$current"
+      if (( ${#candidate} <= budget )); then print -r -- $candidate; return; fi
+    fi
+    candidate="${prefix:+$prefix/}…/$current"
+    if (( ${#candidate} <= budget )); then print -r -- $candidate; return; fi
+    print -r -- "…/$current"
+  }
+
+  __cailoxo_render_full_prompt() {
+    local last_status=${1:-$?}
+    local os_icon render_path home_icon folder_icon is_home__CAILOXO_GIT_ROOT_LOCAL__
+    os_icon=$(__cailoxo_os_icon)
+    home_icon=$__CAILOXO_HOME_ICON
+    folder_icon=$__CAILOXO_FOLDER_ICON
+    [[ $PWD == $HOME ]] && is_home=1 || is_home=0
+    local path_text os_text os_plain fixed budget prompt_style
+__CAILOXO_GIT_ROOT_SET__
+    os_text=$(__cailoxo_apply_template "$__CAILOXO_OS_TEMPLATE")
+    local columns=${COLUMNS:-80}
+    (( columns > 0 )) || columns=80
+    os_plain=$(__cailoxo_plain_template "$os_text")
+    fixed=$(( ${#os_plain} + ${#__CAILOXO_HOME_ICON} + ${#__CAILOXO_FOLDER_ICON} + 10 ))
+    budget=$(( columns - fixed ))
+    (( budget < 1 )) && budget=1
+    render_path=$(__cailoxo_format_path "$(__cailoxo_shorten_path $budget)"__CAILOXO_GIT_ROOT_ARG__)
+    path_text=$(__cailoxo_path_template)
+    local first second
+    first="$(__cailoxo_osc7)$(__cailoxo_pansi "$__CAILOXO_OS_STYLE")$(__cailoxo_style_template "$os_text")$(__cailoxo_pansi "$__CAILOXO_RESET")$__CAILOXO_OS_TAIL"
+    first+="$(__cailoxo_pansi "$__CAILOXO_PATH_STYLE")$(__cailoxo_path_url_start)$(__cailoxo_style_template "$path_text")$(__cailoxo_path_url_end)$(__cailoxo_pansi "$__CAILOXO_RESET")$__CAILOXO_PATH_SEP_LAST"
+    if (( last_status == 0 )); then prompt_style=$__CAILOXO_PROMPT_OK_STYLE; else prompt_style=$__CAILOXO_PROMPT_ERROR_STYLE; fi
+    second="$(__cailoxo_pansi "$prompt_style")$(__cailoxo_style_template "$__CAILOXO_PROMPT_TEMPLATE")$(__cailoxo_pansi "$__CAILOXO_RESET")"
+    (( __CAILOXO_FINAL_SPACE )) && second+=' '
+    print -r -- $first$'\n'$second
+  }
+
+  __cailoxo_render_transient_prompt() {
+    local last_status=${1:-$?} prompt_style
+    if (( last_status == 0 )); then prompt_style=$__CAILOXO_TRANSIENT_OK_STYLE; else prompt_style=$__CAILOXO_TRANSIENT_ERROR_STYLE; fi
+    print -r -- "$(__cailoxo_pansi "$prompt_style")$(__cailoxo_style_template "$__CAILOXO_TRANSIENT_TEMPLATE")$(__cailoxo_pansi "$__CAILOXO_RESET")"
+  }
+
+  __cailoxo_precmd() {
+    typeset -g __CAILOXO_LAST_STATUS=$?
+    setopt prompt_subst
+    PROMPT='$(__cailoxo_render_full_prompt $__CAILOXO_LAST_STATUS)'
+    RPROMPT=
+  }
+
+  __cailoxo_winch() {
+    zle 2>/dev/null || return
+    zle .reset-prompt 2>/dev/null || return
+    zle -R 2>/dev/null || true
+  }
+"#;
+    out.push_str(
+        &body
+            .replace("__CAILOXO_OS_CASES__", &os_cases)
+            .replace("__CAILOXO_OS_UNKNOWN__", &os_unknown)
+            .replace("__CAILOXO_TEMPLATE_REPLACEMENTS__", &template_replacements)
+            .replace("__CAILOXO_STYLE_LOCALS__", &style_locals)
+            .replace("__CAILOXO_STYLE_INIT__", &style_init)
+            .replace("__CAILOXO_STYLE_REPLACEMENTS__", &style_replacements)
+            .replace("__CAILOXO_PLAIN_REPLACEMENTS__", &plain_replacements)
+            .replace("__CAILOXO_GIT_ROOT_FUNCTION__", git_root_function)
+            .replace("__CAILOXO_GIT_ROOT_LOCAL__", git_root_local)
+            .replace("__CAILOXO_GIT_ROOT_SET__", git_root_set)
+            .replace("__CAILOXO_GIT_ROOT_ARG__", git_root_arg),
+    );
+
+    if transient_enabled {
+        out.push_str(
+            r#"
+  __cailoxo_zle_line_finish() {
+    setopt prompt_subst
+    PROMPT='$(__cailoxo_render_transient_prompt $__CAILOXO_LAST_STATUS)'
+    RPROMPT=
+    zle .reset-prompt
+  }
+
+  zle -N zle-line-finish __cailoxo_zle_line_finish
+"#,
+        );
+    }
+
+    out.push_str(
+        r#"  add-zsh-hook precmd __cailoxo_precmd
+  TRAPWINCH() { __cailoxo_winch }
+  __cailoxo_precmd
+"#,
+    );
+
+    Ok(())
+}
+
+fn write_body(
+    out: &mut String,
+    git: Option<&Span>,
+    transient_enabled: bool,
+    features: &Features,
+) -> Result<()> {
+    let Some(git) = git else {
+        return write_body_no_git(out, transient_enabled, features);
+    };
+    let status_cases = if features.git_status {
+        zsh_status_template_cases(git)?
+    } else {
+        String::new()
+    };
+    let os_cases = zsh_os_icon_cases()?;
+    let os_unknown = zsh_os_unknown_icon()?;
+    let upstream_cases = if features.git_upstream_icon {
+        zsh_upstream_icon_cases()?
+    } else {
+        String::new()
+    };
+    let template_conditionals = zsh_template_conditionals(features);
+    let template_replacements = zsh_template_replacements(features);
+    let style_locals = zsh_style_locals(features);
+    let style_init = zsh_style_init(features);
+    let style_replacements = zsh_style_replacements(features);
+    let plain_replacements = zsh_plain_replacements(features);
+    let body = r#"
+  __cailoxo_pansi() {
+    print -nr -- "%{${1}%}"
+  }
+
+  __cailoxo_style_template() {
+    local text=$1
+__CAILOXO_STYLE_LOCALS____CAILOXO_STYLE_INIT____CAILOXO_STYLE_REPLACEMENTS__
+    print -r -- "$text"
+  }
+
+  __cailoxo_plain_template() {
+    local text=$1
+__CAILOXO_PLAIN_REPLACEMENTS__
     print -r -- "$text"
   }
 
@@ -681,35 +1082,7 @@ __CAILOXO_UPSTREAM_CASES__    esac
 
   __cailoxo_apply_template() {
     local tpl=$1
-    local before rest body after then_part else_part
-    while [[ $tpl == *'{{ if status }}'* ]]; do
-      before=${tpl%%'{{ if status }}'*}
-      rest=${tpl#*'{{ if status }}'}
-      body=${rest%%'{{ end }}'*}
-      after=${rest#*'{{ end }}'}
-      if [[ $body == *'{{ else }}'* ]]; then
-        then_part=${body%%'{{ else }}'*}
-        else_part=${body#*'{{ else }}'}
-      else
-        then_part=$body
-        else_part=
-      fi
-      if [[ -n $git_status ]]; then
-        tpl="${before}${then_part}${after}"
-      else
-        tpl="${before}${else_part}${after}"
-      fi
-    done
-    tpl=${tpl//\{\{ icon \}\}/${os_icon}}
-    tpl=${tpl//\{\{ path \}\}/${render_path}}
-    tpl=${tpl//\{\{ home_icon \}\}/${home_icon}}
-    tpl=${tpl//\{\{ folder_icon \}\}/${folder_icon}}
-    tpl=${tpl//\{\{ status \}\}/${git_status}}
-    tpl=${tpl//\{\{ branch_icon \}\}/${branch_icon}}
-    tpl=${tpl//\{\{ upstream_icon \}\}/${upstream_icon}}
-    tpl=${tpl//\{\{ upstream \}\}/${upstream}}
-    tpl=${tpl//\{\{ upstream_url \}\}/${upstream_url}}
-    tpl=${tpl//\{\{ branch \}\}/${branch}}
+__CAILOXO_TEMPLATE_CONDITIONALS____CAILOXO_TEMPLATE_REPLACEMENTS__
     print -r -- $tpl
   }
 
@@ -824,6 +1197,7 @@ __CAILOXO_STATUS_CASES__    esac
       upstream_url=$(__cailoxo_clean_git_url "$upstream_url")
     fi
     __cailoxo_start_fetch
+    (( __CAILOXO_GIT_STATUS )) || return
 
     local ahead=0 behind=0 conflicted=0 untracked=0 modified=0 staged=0 renamed=0 deleted=0 stashed=0
     local out line code x y
@@ -955,7 +1329,13 @@ __CAILOXO_STATUS_CASES__    esac
             .replace("__CAILOXO_STATUS_CASES__", &status_cases)
             .replace("__CAILOXO_OS_CASES__", &os_cases)
             .replace("__CAILOXO_OS_UNKNOWN__", &os_unknown)
-            .replace("__CAILOXO_UPSTREAM_CASES__", &upstream_cases),
+            .replace("__CAILOXO_UPSTREAM_CASES__", &upstream_cases)
+            .replace("__CAILOXO_TEMPLATE_CONDITIONALS__", &template_conditionals)
+            .replace("__CAILOXO_TEMPLATE_REPLACEMENTS__", &template_replacements)
+            .replace("__CAILOXO_STYLE_LOCALS__", &style_locals)
+            .replace("__CAILOXO_STYLE_INIT__", &style_init)
+            .replace("__CAILOXO_STYLE_REPLACEMENTS__", &style_replacements)
+            .replace("__CAILOXO_PLAIN_REPLACEMENTS__", &plain_replacements),
     );
 
     if transient_enabled {
@@ -1028,4 +1408,123 @@ mod tests {
         assert!(script.contains("text=${text//'<b>'/$bold_on}"));
         assert!(script.contains("zle-line-finish"));
     }
+
+    #[test]
+    fn zsh_no_git_span_omits_git_runtime() {
+        let config = Config::parse(NO_GIT_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(!script.contains("__cailoxo_git_info"));
+        assert!(!script.contains("git status"));
+        assert!(!script.contains("git rev-parse"));
+        assert!(!script.contains("__cailoxo_start_fetch"));
+    }
+
+    #[test]
+    fn zsh_no_git_span_keeps_gitdir_probe_when_format_used() {
+        let config = Config::parse(NO_GIT_GITDIR_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(script.contains("__cailoxo_git_root_name"));
+        assert!(script.contains("git rev-parse --show-toplevel"));
+        assert!(!script.contains("__cailoxo_git_info"));
+        assert!(!script.contains("git status"));
+    }
+
+    #[test]
+    fn zsh_omits_unused_style_tags() {
+        let config = Config::parse(include_str!("../../cailoxo.toml")).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(script.contains("bold_on"));
+        assert!(script.contains("italic_on"));
+        assert!(!script.contains("strike_on"));
+        assert!(!script.contains("'<s>'"));
+    }
+
+    #[test]
+    fn zsh_omits_upstream_icon_cases_when_unused() {
+        let config = Config::parse(BRANCH_ONLY_GIT_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(!script.contains("github) upstream_icon"));
+        assert!(!script.contains("gitlab) upstream_icon"));
+    }
+
+    const NO_GIT_CONFIG: &str = r#"
+version = 1
+final_space = true
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+success_foreground = "2"
+error_foreground = "1"
+"#;
+
+    const BRANCH_ONLY_GIT_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line.span]]
+type = "git"
+template = " {{ branch }} "
+background = "2"
+separator = ">"
+
+[line.span.settings]
+fetch_upstream_icon = true
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
+
+    const NO_GIT_GITDIR_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[line.span.settings]
+gitdir_format = "<b>%s</b>"
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
 }

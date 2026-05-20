@@ -22,7 +22,100 @@ pub struct Layout<'a> {
     pub prompt_span: &'a Span,
     pub os: &'a Span,
     pub path: &'a Span,
-    pub git: &'a Span,
+    pub git: Option<&'a Span>,
+}
+
+#[derive(Clone, Copy)]
+pub struct StyleTag {
+    pub open: &'static str,
+    pub close: &'static str,
+    pub on: &'static str,
+    pub off: &'static str,
+    pub zsh_name: &'static str,
+}
+
+pub const STYLE_TAGS: &[StyleTag] = &[
+    StyleTag {
+        open: "<b>",
+        close: "</b>",
+        on: "\\e[1m",
+        off: "\\e[22m",
+        zsh_name: "bold",
+    },
+    StyleTag {
+        open: "<u>",
+        close: "</u>",
+        on: "\\e[4m",
+        off: "\\e[24m",
+        zsh_name: "underline",
+    },
+    StyleTag {
+        open: "<o>",
+        close: "</o>",
+        on: "\\e[53m",
+        off: "\\e[55m",
+        zsh_name: "overline",
+    },
+    StyleTag {
+        open: "<i>",
+        close: "</i>",
+        on: "\\e[3m",
+        off: "\\e[23m",
+        zsh_name: "italic",
+    },
+    StyleTag {
+        open: "<s>",
+        close: "</s>",
+        on: "\\e[9m",
+        off: "\\e[29m",
+        zsh_name: "strike",
+    },
+    StyleTag {
+        open: "<d>",
+        close: "</d>",
+        on: "\\e[2m",
+        off: "\\e[22m",
+        zsh_name: "dim",
+    },
+    StyleTag {
+        open: "<f>",
+        close: "</f>",
+        on: "\\e[5m",
+        off: "\\e[25m",
+        zsh_name: "blink",
+    },
+    StyleTag {
+        open: "<r>",
+        close: "</r>",
+        on: "\\e[7m",
+        off: "\\e[27m",
+        zsh_name: "reverse",
+    },
+];
+
+#[derive(Default)]
+pub struct Features {
+    pub if_status: bool,
+    pub if_home: bool,
+    pub var_icon: bool,
+    pub var_path: bool,
+    pub var_home_icon: bool,
+    pub var_folder_icon: bool,
+    pub var_status: bool,
+    pub var_branch_icon: bool,
+    pub var_upstream_icon: bool,
+    pub var_upstream: bool,
+    pub var_upstream_url: bool,
+    pub var_branch: bool,
+    pub git_status: bool,
+    pub git_upstream_icon: bool,
+    pub git_upstream_info: bool,
+    pub git_url: bool,
+    pub git_fetch: bool,
+    pub path_url: bool,
+    pub osc7: bool,
+    pub gitdir_format: bool,
+    pub tags: Vec<StyleTag>,
 }
 
 pub fn layout(config: &Config) -> Result<Layout<'_>> {
@@ -45,8 +138,7 @@ pub fn layout(config: &Config) -> Result<Layout<'_>> {
     let os = find_span(first_line, SpanType::Os).context("MVP requires os span on first line")?;
     let path =
         find_span(first_line, SpanType::Path).context("MVP requires path span on first line")?;
-    let git =
-        find_span(first_line, SpanType::Git).context("MVP requires git span on first line")?;
+    let git = find_span(first_line, SpanType::Git);
 
     Ok(Layout {
         prompt_span,
@@ -54,6 +146,98 @@ pub fn layout(config: &Config) -> Result<Layout<'_>> {
         path,
         git,
     })
+}
+
+pub fn features(config: &Config, layout: &Layout<'_>) -> Features {
+    let mut features = Features::default();
+    let transient_template = config
+        .transient
+        .as_ref()
+        .map(|transient| transient.template.as_str())
+        .filter(|template| !template.is_empty())
+        .unwrap_or(&layout.prompt_span.template);
+
+    for text in template_texts(config, layout, transient_template) {
+        features.if_status |= text.contains("{{ if status }}");
+        features.if_home |= text.contains("{{ if home }}");
+        features.var_icon |= has_var(text, "icon");
+        features.var_path |= has_var(text, "path");
+        features.var_home_icon |= has_var(text, "home_icon");
+        features.var_folder_icon |= has_var(text, "folder_icon");
+        features.var_status |= has_var(text, "status");
+        features.var_branch_icon |= has_var(text, "branch_icon");
+        features.var_upstream_icon |= has_var(text, "upstream_icon");
+        features.var_upstream |= has_var(text, "upstream");
+        features.var_upstream_url |= has_var(text, "upstream_url");
+        features.var_branch |= has_var(text, "branch");
+    }
+
+    if let Some(git) = layout.git {
+        let fetch_upstream_icon = git.setting_bool("fetch_upstream_icon").unwrap_or(false);
+        features.git_status = features.var_status || features.if_status;
+        features.git_upstream_icon = fetch_upstream_icon && features.var_upstream_icon;
+        features.git_url = git.setting_bool("url").unwrap_or(false)
+            || git.setting_bool("hyperlink").unwrap_or(false);
+        features.git_upstream_info = features.git_upstream_icon
+            || features.var_upstream
+            || features.var_upstream_url
+            || features.git_url;
+        features.git_fetch =
+            features.git_status && git.setting_bool("fetch_remote").unwrap_or(false);
+    }
+
+    features.path_url = layout.path.setting_bool("url").unwrap_or(false)
+        || layout.path.setting_bool("hyperlink").unwrap_or(false);
+    features.osc7 = layout.path.setting_bool("osc7").unwrap_or(false);
+    features.gitdir_format = layout
+        .path
+        .setting_str("gitdir_format")
+        .is_some_and(|format| !format.is_empty());
+
+    for tag in STYLE_TAGS {
+        if template_texts(config, layout, transient_template)
+            .iter()
+            .any(|text| text.contains(tag.open) || text.contains(tag.close))
+        {
+            features.tags.push(*tag);
+        }
+    }
+
+    features
+}
+
+fn template_texts<'a>(
+    config: &'a Config,
+    layout: &'a Layout<'a>,
+    transient_template: &'a str,
+) -> Vec<&'a str> {
+    let mut texts = vec![
+        layout.os.template.as_str(),
+        layout.path.template.as_str(),
+        layout.prompt_span.template.as_str(),
+        transient_template,
+    ];
+    if let Some(git) = layout.git {
+        texts.push(git.template.as_str());
+        for status in STATUSES {
+            if let Some(template) = git.status_template(status) {
+                texts.push(template);
+            }
+        }
+    }
+    let _ = config;
+    texts.extend(
+        layout
+            .path
+            .setting_str("edge_format")
+            .into_iter()
+            .chain(layout.path.setting_str("gitdir_format")),
+    );
+    texts
+}
+
+fn has_var(text: &str, name: &str) -> bool {
+    text.contains(&format!("{{{{ {name} }}}}")) || text.contains(&format!("{{{{{name}}}}}"))
 }
 
 fn find_span(spans: &[Span], span_type: SpanType) -> Option<&Span> {
@@ -326,4 +510,20 @@ pub fn ansi_pair(fg: Option<&String>, bg: Option<&String>) -> Result<String> {
 
 pub fn zsh_prompt_ansi(input: &str) -> String {
     input.replace('\u{1b}', "\\e")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
+
+    use super::*;
+
+    #[test]
+    fn detects_only_used_style_tags() {
+        let config = Config::parse(include_str!("../../cailoxo.toml")).unwrap();
+        let layout = layout(&config).unwrap();
+        let features = features(&config, &layout);
+        let tags: Vec<_> = features.tags.iter().map(|tag| tag.open).collect();
+        assert_eq!(tags, vec!["<b>", "<i>"]);
+    }
 }
