@@ -4,7 +4,7 @@
 
 It reads `cailoxo.toml` and generates native prompt scripts for `zsh`, `nu`, and `pwsh`. No prompt framework is required at runtime.
 
-Goal: same prompt shape everywhere: OS, adaptive path, local Git branch/status, and transient prompt behavior.
+Goal: same prompt shape everywhere: OS, adaptive path, Git branch/status, and transient prompt behavior.
 
 ## Name
 
@@ -18,7 +18,7 @@ The name matches the prompt behavior: stretch when the terminal is wide, compres
 - native shell output for `zsh`, `nu`, and `pwsh`
 - adaptive path truncation based on terminal width
 - local Git branch and status
-- no network fetches during prompt rendering
+- optional background Git fetch outside prompt rendering
 - simple transient prompt
 
 ## Supported Shells
@@ -55,7 +55,13 @@ source /path/to/cailoxo/output/prompt.nu
 
 Use `--output` to write generated scripts somewhere else.
 
-See `docs/configuration.md` for config details.
+Docs:
+
+- `docs/installation.md`
+- `docs/configuration.md`
+- `docs/template-variables.md`
+- `docs/shell-support.md`
+- `docs/troubleshooting.md`
 
 Quick interactive tests:
 
@@ -93,4 +99,4 @@ Crates.io publish requires repository secret `CARGO_REGISTRY_TOKEN`.
 
 ## Status
 
-Early project. Design and implementation are still forming.
+MVP complete. Current work is stabilization, docs, tests, and post-MVP features tracked in `PLAN.md`.
