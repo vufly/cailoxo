@@ -65,15 +65,16 @@ separator = " "
 url = true
 
 [line.span.settings.status]
-ahead = "{{status_icon}}{{ count }}"
 behind = "{{status_icon}}{{ count }}"
+ahead = "{{status_icon}}{{ count }}"
+stashed = "{{status_icon}}{{ count }}"
+action = "{{ action }}"
 conflicted = "{{status_icon}}{{ count }}"
-untracked = "{{status_icon}}{{ count }}"
-modified = "{{status_icon}}{{ count }}"
 staged = "{{status_icon}}{{ count }}"
+modified = "{{status_icon}}{{ count }}"
+untracked = "{{status_icon}}{{ count }}"
 renamed = "{{status_icon}}{{ count }}"
 deleted = "{{status_icon}}{{ count }}"
-stashed = "{{status_icon}}{{ count }}"
 
 [[line]]
 newline = true

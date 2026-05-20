@@ -1169,8 +1169,72 @@ __CAILOXO_TEMPLATE_CONDITIONALS____CAILOXO_TEMPLATE_REPLACEMENTS__
     local name=$1 template count
     case $name in
 __CAILOXO_STATUS_CASES__    esac
+    if [[ $name == action ]]; then
+      [[ -n $action ]] || return
+      print -r -- ${template//\{\{ action \}\}/$action}
+      return
+    fi
     (( count > 0 )) || return
     print -r -- ${template//\{\{ count \}\}/$count}
+  }
+
+  __cailoxo_git_file() {
+    git rev-parse --git-path "$1" 2>/dev/null
+  }
+
+  __cailoxo_git_action_with_progress() {
+    local action=$1 dir=$2 next= last=
+    [[ -r $dir/msgnum ]] && next=$(<$dir/msgnum)
+    [[ -r $dir/end ]] && last=$(<$dir/end)
+    [[ -r $dir/next ]] && next=$(<$dir/next)
+    [[ -r $dir/last ]] && last=$(<$dir/last)
+    if [[ -n $next && -n $last ]]; then
+      print -r -- "$action $next/$last"
+    else
+      print -r -- "$action"
+    fi
+  }
+
+  __cailoxo_git_action() {
+    local path
+    path=$(__cailoxo_git_file rebase-merge)
+    if [[ -d $path ]]; then
+      if [[ -e $path/interactive ]]; then
+        __cailoxo_git_action_with_progress rebase-i "$path"
+      else
+        __cailoxo_git_action_with_progress rebase-m "$path"
+      fi
+      return
+    fi
+
+    path=$(__cailoxo_git_file rebase-apply)
+    if [[ -d $path ]]; then
+      if [[ -e $path/rebasing ]]; then
+        __cailoxo_git_action_with_progress rebase "$path"
+      elif [[ -e $path/applying ]]; then
+        __cailoxo_git_action_with_progress am "$path"
+      else
+        __cailoxo_git_action_with_progress am/rebase "$path"
+      fi
+      return
+    fi
+
+    path=$(__cailoxo_git_file MERGE_HEAD)
+    [[ -e $path ]] && { print -r -- merge; return; }
+    path=$(__cailoxo_git_file REVERT_HEAD)
+    if [[ -e $path ]]; then
+      path=$(__cailoxo_git_file sequencer)
+      [[ -d $path ]] && print -r -- revert-seq || print -r -- revert
+      return
+    fi
+    path=$(__cailoxo_git_file CHERRY_PICK_HEAD)
+    if [[ -e $path ]]; then
+      path=$(__cailoxo_git_file sequencer)
+      [[ -d $path ]] && print -r -- cherry-seq || print -r -- cherry
+      return
+    fi
+    path=$(__cailoxo_git_file BISECT_LOG)
+    [[ -e $path ]] && print -r -- bisect
   }
 
   __cailoxo_git_info() {
@@ -1199,7 +1263,7 @@ __CAILOXO_STATUS_CASES__    esac
     __cailoxo_start_fetch
     (( __CAILOXO_GIT_STATUS )) || return
 
-    local ahead=0 behind=0 conflicted=0 untracked=0 modified=0 staged=0 renamed=0 deleted=0 stashed=0
+    local ahead=0 behind=0 action= conflicted=0 untracked=0 modified=0 staged=0 renamed=0 deleted=0 stashed=0
     local out line code x y
     out=$(git status --porcelain=v1 2>/dev/null)
     while IFS= read -r line; do
@@ -1222,12 +1286,13 @@ __CAILOXO_STATUS_CASES__    esac
 
     ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || print -r -- 0)
     behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || print -r -- 0)
+    action=$(__cailoxo_git_action)
     stashed=$(git stash list 2>/dev/null | wc -l | tr -d ' ')
     (( conflicted || untracked || modified || staged || renamed || deleted )) && git_dirty=1
 
     local -a items
     local item name
-    for name in ahead behind conflicted untracked modified staged renamed deleted stashed; do
+    for name in behind ahead stashed action conflicted staged modified untracked renamed deleted; do
       item=$(__cailoxo_status_item $name)
       [[ -n $item ]] && items+=("$item")
     done
@@ -1405,6 +1470,9 @@ mod tests {
         assert!(script.contains("__cailoxo_git_url_start"));
         assert!(script.contains("typeset -gi __CAILOXO_OSC7=1"));
         assert!(script.contains("__cailoxo_start_fetch"));
+        assert!(script.contains("__cailoxo_git_action"));
+        assert!(script.contains("action) template='{{ action }}'"));
+        assert!(script.contains("for name in behind ahead stashed action conflicted"));
         assert!(script.contains("text=${text//'<b>'/$bold_on}"));
         assert!(script.contains(
             "(( conflicted || untracked || modified || staged || renamed || deleted )) && git_dirty=1"

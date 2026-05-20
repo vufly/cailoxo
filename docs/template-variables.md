@@ -105,20 +105,22 @@ Git status templates receive:
 | --- | --- |
 | `count` | Count for current status kind |
 | `status_icon` | Icon for current status kind from selected `git_status.<icon_set>` |
+| `action` | Git repository action for the `action` status kind |
 
 Status kinds:
 
 | Status | Meaning |
 | --- | --- |
-| `ahead` | Local commits ahead of upstream, using existing local refs |
 | `behind` | Local commits behind upstream, using existing local refs |
+| `ahead` | Local commits ahead of upstream, using existing local refs |
+| `stashed` | Stash entries |
+| `action` | Current Git action, such as `merge`, `cherry`, `rebase-i`, or `bisect` |
 | `conflicted` | Files with merge conflicts |
-| `untracked` | Untracked files |
-| `modified` | Modified files in worktree |
 | `staged` | Files staged in index |
+| `modified` | Modified files in worktree |
+| `untracked` | Untracked files |
 | `renamed` | Renamed files |
 | `deleted` | Deleted files |
-| `stashed` | Stash entries |
 
 Example:
 

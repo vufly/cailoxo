@@ -852,10 +852,69 @@ def cailoxo-shorten-path [budget: int] {
   $"…/($current)"
 }
 
-def cailoxo-status-item [name: string, count: int] {
-  if $count <= 0 { return "" }
+def cailoxo-status-item [name: string, count: int, action: string] {
   let template = ($CAILOXO_STATUS_TEMPLATES | get $name)
+  if $name == "action" {
+    if $action == "" { return "" }
+    return ($template | str replace --all "{{ action }}" $action)
+  }
+  if $count <= 0 { return "" }
   $template | str replace --all "{{ count }}" ($count | into string)
+}
+
+def cailoxo-git-path [name: string] {
+  let out = (git rev-parse --git-path $name | complete)
+  if $out.exit_code == 0 { $out.stdout | str trim } else { "" }
+}
+
+def cailoxo-read-git-file [path: string] {
+  if $path != "" and ($path | path exists) { open --raw $path | str trim } else { "" }
+}
+
+def cailoxo-git-action-with-progress [action: string, dir: string] {
+  let msgnum = (cailoxo-read-git-file ($dir | path join "msgnum"))
+  let end = (cailoxo-read-git-file ($dir | path join "end"))
+  let next = if $msgnum != "" { $msgnum } else { cailoxo-read-git-file ($dir | path join "next") }
+  let last = if $end != "" { $end } else { cailoxo-read-git-file ($dir | path join "last") }
+  if $next != "" and $last != "" { $"($action) ($next)/($last)" } else { $action }
+}
+
+def cailoxo-git-action [] {
+  let rebase_merge = (cailoxo-git-path "rebase-merge")
+  if $rebase_merge != "" and ($rebase_merge | path exists) {
+    let interactive = ($rebase_merge | path join "interactive")
+    let action = if ($interactive | path exists) { "rebase-i" } else { "rebase-m" }
+    return (cailoxo-git-action-with-progress $action $rebase_merge)
+  }
+
+  let rebase_apply = (cailoxo-git-path "rebase-apply")
+  if $rebase_apply != "" and ($rebase_apply | path exists) {
+    let rebasing = ($rebase_apply | path join "rebasing")
+    let applying = ($rebase_apply | path join "applying")
+    let action = if ($rebasing | path exists) { "rebase" } else if ($applying | path exists) { "am" } else { "am/rebase" }
+    return (cailoxo-git-action-with-progress $action $rebase_apply)
+  }
+
+  let merge_head = (cailoxo-git-path "MERGE_HEAD")
+  if $merge_head != "" and ($merge_head | path exists) { return "merge" }
+
+  let revert_head = (cailoxo-git-path "REVERT_HEAD")
+  if $revert_head != "" and ($revert_head | path exists) {
+    let sequencer = (cailoxo-git-path "sequencer")
+    if $sequencer != "" and ($sequencer | path exists) { return "revert-seq" }
+    return "revert"
+  }
+
+  let cherry_head = (cailoxo-git-path "CHERRY_PICK_HEAD")
+  if $cherry_head != "" and ($cherry_head | path exists) {
+    let sequencer = (cailoxo-git-path "sequencer")
+    if $sequencer != "" and ($sequencer | path exists) { return "cherry-seq" }
+    return "cherry"
+  }
+
+  let bisect_log = (cailoxo-git-path "BISECT_LOG")
+  if $bisect_log != "" and ($bisect_log | path exists) { return "bisect" }
+  ""
 }
 
 def cailoxo-git-info [] {
@@ -875,7 +934,7 @@ def cailoxo-git-info [] {
   cailoxo-start-fetch $branch
   if not $CAILOXO_GIT_STATUS { return {branch: $branch, status: "", dirty: false, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url} }
 
-  mut counts = {ahead: 0, behind: 0, conflicted: 0, untracked: 0, modified: 0, staged: 0, renamed: 0, deleted: 0, stashed: 0}
+  mut counts = {ahead: 0, behind: 0, action: 0, conflicted: 0, untracked: 0, modified: 0, staged: 0, renamed: 0, deleted: 0, stashed: 0}
   let status_out = (git status --porcelain=v1 | complete)
   for line in ($status_out.stdout | lines) {
     if $line == "" { continue }
@@ -900,13 +959,14 @@ def cailoxo-git-info [] {
   if $ahead_out.exit_code == 0 { $counts = ($counts | upsert ahead (($ahead_out.stdout | str trim | into int) | default 0)) }
   let behind_out = (git rev-list --count 'HEAD..@{upstream}' | complete)
   if $behind_out.exit_code == 0 { $counts = ($counts | upsert behind (($behind_out.stdout | str trim | into int) | default 0)) }
+  let action = (cailoxo-git-action)
   let stash_out = (git stash list | complete)
   if $stash_out.exit_code == 0 { $counts = ($counts | upsert stashed (($stash_out.stdout | lines | length) | default 0)) }
   let dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) > 0)
 
   mut items = []
-  for name in [ahead behind conflicted untracked modified staged renamed deleted stashed] {
-    let item = (cailoxo-status-item $name ($counts | get $name))
+  for name in [behind ahead stashed action conflicted staged modified untracked renamed deleted] {
+    let item = (cailoxo-status-item $name ($counts | get $name) $action)
     if $item != "" { $items = ($items | append $item) }
   }
   {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: $dirty, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
@@ -1011,6 +1071,9 @@ mod tests {
         assert!(script.contains("def cailoxo-style-template"));
         assert!(script.contains("def cailoxo-format-path"));
         assert!(script.contains("def cailoxo-start-fetch"));
+        assert!(script.contains("def cailoxo-git-action []"));
+        assert!(script.contains("action: \"{{ action }}\""));
+        assert!(script.contains("for name in [behind ahead stashed action conflicted"));
         assert!(script.contains("str replace --all \"<b>\""));
         assert!(script.contains(
             "let dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) > 0)"

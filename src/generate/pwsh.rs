@@ -1011,9 +1011,71 @@ function Cailoxo-Path-Template {
 }
 
 function Cailoxo-Status-Item {
-  param([string]$Name, [int]$Count)
+  param([string]$Name, [int]$Count, [string]$Action)
+  if ($Name -eq 'action') {
+    if ([string]::IsNullOrEmpty($Action)) { return '' }
+    return $script:CAILOXO_STATUS_TEMPLATES[$Name].Replace('{{ action }}', $Action)
+  }
   if ($Count -le 0) { return '' }
   $script:CAILOXO_STATUS_TEMPLATES[$Name].Replace('{{ count }}', [string]$Count)
+}
+
+function Cailoxo-Git-Path {
+  param([string]$Name)
+  $path = (& git rev-parse --git-path $Name 2>$null) -join ''
+  if ($LASTEXITCODE -ne 0) { return '' }
+  $path.Trim()
+}
+
+function Cailoxo-Read-Git-File {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return '' }
+  try { ((Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) -as [string]).Trim() } catch { '' }
+}
+
+function Cailoxo-Git-Action-With-Progress {
+  param([string]$Action, [string]$Dir)
+  $msgnum = Cailoxo-Read-Git-File (Join-Path $Dir 'msgnum')
+  $end = Cailoxo-Read-Git-File (Join-Path $Dir 'end')
+  $next = if ($msgnum -ne '') { $msgnum } else { Cailoxo-Read-Git-File (Join-Path $Dir 'next') }
+  $last = if ($end -ne '') { $end } else { Cailoxo-Read-Git-File (Join-Path $Dir 'last') }
+  if ($next -ne '' -and $last -ne '') { return "$Action $next/$last" }
+  $Action
+}
+
+function Cailoxo-Git-Action {
+  $rebaseMerge = Cailoxo-Git-Path 'rebase-merge'
+  if ($rebaseMerge -ne '' -and (Test-Path -LiteralPath $rebaseMerge)) {
+    $action = if (Test-Path -LiteralPath (Join-Path $rebaseMerge 'interactive')) { 'rebase-i' } else { 'rebase-m' }
+    return (Cailoxo-Git-Action-With-Progress $action $rebaseMerge)
+  }
+
+  $rebaseApply = Cailoxo-Git-Path 'rebase-apply'
+  if ($rebaseApply -ne '' -and (Test-Path -LiteralPath $rebaseApply)) {
+    $action = if (Test-Path -LiteralPath (Join-Path $rebaseApply 'rebasing')) { 'rebase' } elseif (Test-Path -LiteralPath (Join-Path $rebaseApply 'applying')) { 'am' } else { 'am/rebase' }
+    return (Cailoxo-Git-Action-With-Progress $action $rebaseApply)
+  }
+
+  $mergeHead = Cailoxo-Git-Path 'MERGE_HEAD'
+  if ($mergeHead -ne '' -and (Test-Path -LiteralPath $mergeHead)) { return 'merge' }
+
+  $revertHead = Cailoxo-Git-Path 'REVERT_HEAD'
+  if ($revertHead -ne '' -and (Test-Path -LiteralPath $revertHead)) {
+    $sequencer = Cailoxo-Git-Path 'sequencer'
+    if ($sequencer -ne '' -and (Test-Path -LiteralPath $sequencer)) { return 'revert-seq' }
+    return 'revert'
+  }
+
+  $cherryHead = Cailoxo-Git-Path 'CHERRY_PICK_HEAD'
+  if ($cherryHead -ne '' -and (Test-Path -LiteralPath $cherryHead)) {
+    $sequencer = Cailoxo-Git-Path 'sequencer'
+    if ($sequencer -ne '' -and (Test-Path -LiteralPath $sequencer)) { return 'cherry-seq' }
+    return 'cherry'
+  }
+
+  $bisectLog = Cailoxo-Git-Path 'BISECT_LOG'
+  if ($bisectLog -ne '' -and (Test-Path -LiteralPath $bisectLog)) { return 'bisect' }
+  ''
 }
 
 function Cailoxo-Count-Command {
@@ -1040,7 +1102,7 @@ function Cailoxo-Git-Info {
   Cailoxo-Start-Fetch $branch
   if (-not $script:CAILOXO_GIT_STATUS) { return @{ branch = $branch; status = ''; dirty = $false; upstream = $upstream.upstream; upstream_icon = $upstream.upstream_icon; upstream_url = $upstream.upstream_url } }
 
-  $counts = @{ ahead = 0; behind = 0; conflicted = 0; untracked = 0; modified = 0; staged = 0; renamed = 0; deleted = 0; stashed = 0 }
+  $counts = @{ ahead = 0; behind = 0; action = 0; conflicted = 0; untracked = 0; modified = 0; staged = 0; renamed = 0; deleted = 0; stashed = 0 }
   $status = & git status --porcelain=v1 2>$null
   foreach ($line in @($status)) {
     if ([string]::IsNullOrEmpty($line) -or $line.Length -lt 2) { continue }
@@ -1057,13 +1119,14 @@ function Cailoxo-Git-Info {
 
   $counts.ahead = Cailoxo-Count-Command { git rev-list --count '@{upstream}..HEAD' }
   $counts.behind = Cailoxo-Count-Command { git rev-list --count 'HEAD..@{upstream}' }
+  $action = Cailoxo-Git-Action
   $stash = & git stash list 2>$null
   if ($LASTEXITCODE -eq 0) { $counts.stashed = @($stash | Where-Object { $_ -ne '' }).Count }
   $dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) -gt 0)
 
   $items = @()
-  foreach ($name in @('ahead', 'behind', 'conflicted', 'untracked', 'modified', 'staged', 'renamed', 'deleted', 'stashed')) {
-    $item = Cailoxo-Status-Item $name $counts[$name]
+  foreach ($name in @('behind', 'ahead', 'stashed', 'action', 'conflicted', 'staged', 'modified', 'untracked', 'renamed', 'deleted')) {
+    $item = Cailoxo-Status-Item $name $counts[$name] $action
     if ($item -ne '') { $items += $item }
   }
   @{ branch = $branch; status = ($items -join $script:CAILOXO_STATUS_SEPARATOR); dirty = $dirty; upstream = $upstream.upstream; upstream_icon = $upstream.upstream_icon; upstream_url = $upstream.upstream_url }
@@ -1197,6 +1260,9 @@ mod tests {
         assert!(script.contains("function Cailoxo-Git-Url-Start"));
         assert!(script.contains("$script:CAILOXO_OSC7 = $true"));
         assert!(script.contains("function Cailoxo-Start-Fetch"));
+        assert!(script.contains("function Cailoxo-Git-Action"));
+        assert!(script.contains("'action' = '{{ action }}'"));
+        assert!(script.contains("@('behind', 'ahead', 'stashed', 'action', 'conflicted'"));
         assert!(script.contains(
             "$dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) -gt 0)"
         ));

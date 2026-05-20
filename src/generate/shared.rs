@@ -5,15 +5,16 @@ use anyhow::{Context, Result, bail};
 use crate::config::{Config, Span, SpanType};
 
 pub const STATUSES: &[&str] = &[
-    "ahead",
     "behind",
+    "ahead",
+    "stashed",
+    "action",
     "conflicted",
-    "untracked",
-    "modified",
     "staged",
+    "modified",
+    "untracked",
     "renamed",
     "deleted",
-    "stashed",
 ];
 
 const DEFAULT_ICONS: &str = include_str!("../../defaults/icons.toml");
@@ -297,7 +298,11 @@ pub fn status_template(span: &Span, name: &str) -> Result<String> {
             .replace("{{status_icon}}", status_icon));
     }
 
-    Ok(format!("{status_icon}{{{{ count }}}}"))
+    if name == "action" {
+        Ok(format!("{status_icon}{{{{ action }}}}"))
+    } else {
+        Ok(format!("{status_icon}{{{{ count }}}}"))
+    }
 }
 
 pub fn zsh_status_template_cases(git: &Span) -> Result<String> {

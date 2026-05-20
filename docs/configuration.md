@@ -189,6 +189,7 @@ Refresh behavior differs by shell:
 
 `fetch_remote_interval_ms` throttles fetch starts per repository/remote. `fetch_remote_timeout_ms` limits each background fetch in zsh and PowerShell when supported.
 Git `branch_icon`, `upstream_icon`, and `status` symbols come from `defaults/icons.toml`. `icon_set` selects `git_status.<set>`; default config uses `minimal`.
+Git action labels follow p10k/gitstatus naming: `merge`, `revert`, `revert-seq`, `cherry`, `cherry-seq`, `bisect`, `rebase`, `rebase-i`, `rebase-m`, `am`, and `am/rebase`. Rebase and apply-mailbox actions include progress when Git exposes it, such as `rebase-i 2/5`.
 
 `url = true` wraps the rendered Git span in an OSC8 hyperlink to the upstream repository. SSH remotes such as `git@github.com:user/repo.git` are converted to browser URLs such as `https://github.com/user/repo`.
 
