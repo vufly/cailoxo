@@ -24,6 +24,12 @@ Default outputs:
 
 Use `--output` for a stable location, such as `~/.config/cailoxo/prompt.zsh`.
 
+Use `--config` when your TOML file lives somewhere else:
+
+```sh
+cailoxo generate --shell zsh --config ~/.config/cailoxo/theme.toml --output ~/.config/cailoxo/prompt.zsh
+```
+
 ## GitHub Release Binaries
 
 Download a binary from the latest GitHub release, then put it on `PATH`.
@@ -64,6 +70,12 @@ After upgrading `cailoxo`, regenerate scripts:
 cailoxo generate --shell zsh --output ~/.config/cailoxo/prompt.zsh
 cailoxo generate --shell nu --output ~/.config/cailoxo/prompt.nu
 cailoxo generate --shell pwsh --output ~/.config/cailoxo/prompt.ps1
+```
+
+If you use a custom config path, include it every time you regenerate:
+
+```sh
+cailoxo generate --shell zsh --config ~/.config/cailoxo/theme.toml --output ~/.config/cailoxo/prompt.zsh
 ```
 
 Restart shell sessions or source the generated script again.

@@ -117,6 +117,7 @@ PowerShell:
 - `v0.1.0`: initial native prompt generator release.
 - `v0.1.1`: async fetch and cross-shell path improvements.
 - `v0.1.2`: Nu transient fix and changed-only fetch repaint release.
+- `v0.2.0`: MVP complete release with prompt segment links and expanded docs.
 
 ## Validation
 

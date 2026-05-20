@@ -39,6 +39,12 @@ cailoxo generate --shell nu
 cailoxo generate --shell pwsh
 ```
 
+Use a custom config file with `--config`:
+
+```sh
+cailoxo generate --shell zsh --config ~/.config/cailoxo/theme.toml
+```
+
 Source generated scripts from shell startup files:
 
 ```zsh
@@ -53,7 +59,7 @@ source /path/to/cailoxo/output/prompt.nu
 . /path/to/cailoxo/output/prompt.ps1
 ```
 
-Use `--output` to write generated scripts somewhere else.
+Use `--output` to write generated scripts somewhere else. `--config` defaults to `cailoxo.toml` in the current directory.
 
 Docs:
 

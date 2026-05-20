@@ -6,7 +6,7 @@ Archived MVP scope and completion notes live in `plans/MVP.md`.
 
 ## Current State
 
-- Version: `0.1.2`.
+- Version: `0.2.0`.
 - Shell targets: `zsh`, `nu`, `pwsh`.
 - Runtime model: generated native shell scripts.
 - Prompt shape: two-line left prompt with OS, adaptive path, Git, and prompt character.

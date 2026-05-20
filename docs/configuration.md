@@ -18,6 +18,12 @@ Default outputs:
 
 Use `--output` to write somewhere else.
 
+Use `--config` to read a custom TOML file instead of `cailoxo.toml`:
+
+```sh
+cailoxo generate --shell zsh --config ~/.config/cailoxo/theme.toml --output ~/.config/cailoxo/prompt.zsh
+```
+
 Source generated scripts from shell startup files.
 
 ```zsh
