@@ -42,7 +42,6 @@ Archived MVP scope and completion notes live in `plans/MVP.md`.
 - Add icon override docs and examples.
 - Add more bundled themes.
 - Add right prompt support.
-- Add optional console title support.
 - Add config validation diagnostics with line/path context.
 - Add `cailoxo doctor` for shell/profile/debug info.
 - Add installation docs for package managers when distribution exists.

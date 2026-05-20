@@ -7,9 +7,6 @@ pub struct Config {
     pub version: u32,
     #[serde(default)]
     pub final_space: bool,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub console_title: Option<String>,
     #[serde(default)]
     pub transient: Option<Transient>,
     #[serde(default)]

@@ -1,7 +1,6 @@
 # MVP cailoxo config based on the current oh-my-posh theme.
 version = 1
 final_space = true
-console_title = "{{ shell }} {{ folder }}"
 
 [transient]
 enabled = true
