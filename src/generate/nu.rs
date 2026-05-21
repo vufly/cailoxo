@@ -221,6 +221,16 @@ fn generate_no_git(config: &Config) -> Result<String> {
         "const CAILOXO_FINAL_SPACE = {}",
         if config.final_space { "true" } else { "false" }
     )?;
+    writeln!(
+        script,
+        "const CAILOXO_PATH_URL = {}",
+        if features.path_url { "true" } else { "false" }
+    )?;
+    writeln!(
+        script,
+        "const CAILOXO_OSC7 = {}",
+        if features.osc7 { "true" } else { "false" }
+    )?;
     writeln!(script, "const CAILOXO_OS_STYLE = {}", nu_string(&os_style))?;
     writeln!(
         script,
@@ -277,6 +287,56 @@ def cailoxo-format-part [value: string, format: string] {
   if $format == "" { return $value }
   if ($format | str contains "%s") { return ($format | str replace --all "%s" $value) }
   $value
+}
+
+def cailoxo-url-escape [value: string] {
+  $value
+  | str replace --all '\\' '/'
+  | str replace --all '%' '%25'
+  | str replace --all ' ' '%20'
+  | str replace --all '#' '%23'
+  | str replace --all '?' '%3F'
+  | str replace --all ';' '%3B'
+}
+
+def cailoxo-host-name [] {
+  let computer = ($env.COMPUTERNAME? | default "")
+  if $computer != "" { return $computer }
+  let hostname_env = ($env.HOSTNAME? | default "")
+  if $hostname_env != "" { return $hostname_env }
+  let hostname_out = (hostname | complete)
+  if $hostname_out.exit_code == 0 { $hostname_out.stdout | str trim } else { "" }
+}
+
+def cailoxo-wsl-distro [] {
+  let release = "/proc/sys/kernel/osrelease"
+  if not ($release | path exists) { return "" }
+  let text = (open --raw $release | str downcase)
+  if not ($text | str contains "microsoft") { return "" }
+  $env.WSL_DISTRO_NAME? | default ""
+}
+
+def cailoxo-file-url [] {
+  let path = (cailoxo-url-escape (pwd | path expand))
+  if $path =~ '^[A-Za-z]:/' { return $"file:///($path)" }
+  let distro = (cailoxo-wsl-distro)
+  if $distro != "" { return $"file://wsl.localhost/(cailoxo-url-escape $distro)($path)" }
+  $"file://(cailoxo-host-name)($path)"
+}
+
+def cailoxo-osc7 [] {
+  if not $CAILOXO_OSC7 { return "" }
+  "\u{1b}]7;" + (cailoxo-file-url) + "\u{1b}\\"
+}
+
+def cailoxo-path-url-start [] {
+  if not $CAILOXO_PATH_URL { return "" }
+  "\u{1b}]8;;" + (cailoxo-file-url) + "\u{1b}\\"
+}
+
+def cailoxo-path-url-end [] {
+  if not $CAILOXO_PATH_URL { return "" }
+  "\u{1b}]8;;\u{1b}\\"
 }
 
 def cailoxo-normalize-path [path: string] { $path | str replace --all '\\' '/' }
@@ -345,7 +405,7 @@ __CAILOXO_GIT_ROOT_SET__
   let path = (cailoxo-format-path (cailoxo-shorten-path $budget) __CAILOXO_GIT_ROOT_ARG__)
   let is_home = ((pwd | path expand) == ($nu.home-dir | path expand))
   let path_text = (cailoxo-path-template {path: $path, home: $is_home, home_icon: $CAILOXO_HOME_ICON, folder_icon: $CAILOXO_FOLDER_ICON})
-  ($CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL + $CAILOXO_PATH_STYLE + (cailoxo-style-template $path_text) + $CAILOXO_RESET + $CAILOXO_PATH_SEP_LAST) + "\n"
+  (cailoxo-osc7) + ($CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL + $CAILOXO_PATH_STYLE + (cailoxo-path-url-start) + (cailoxo-style-template $path_text) + (cailoxo-path-url-end) + $CAILOXO_RESET + $CAILOXO_PATH_SEP_LAST) + "\n"
 }
 
 def cailoxo-render-indicator [] {
@@ -571,6 +631,11 @@ fn write_consts(
     )?;
     writeln!(
         out,
+        "const CAILOXO_GIT_URL = {}",
+        if features.git_url { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
         "const CAILOXO_FETCH_REMOTE = {}",
         if fetch_remote { "true" } else { "false" }
     )?;
@@ -583,6 +648,16 @@ fn write_consts(
         out,
         "const CAILOXO_FINAL_SPACE = {}",
         if final_space { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "const CAILOXO_PATH_URL = {}",
+        if features.path_url { "true" } else { "false" }
+    )?;
+    writeln!(
+        out,
+        "const CAILOXO_OSC7 = {}",
+        if features.osc7 { "true" } else { "false" }
     )?;
     writeln!(out, "const CAILOXO_OS_STYLE = {}", nu_string(os_style))?;
     writeln!(out, "const CAILOXO_PATH_STYLE = {}", nu_string(path_style))?;
@@ -672,6 +747,62 @@ def cailoxo-upstream-provider [url: string] {
   if ($normalized | str contains "github.com") { "github" } else if ($normalized | str contains "gitlab.com") { "gitlab" } else if ($normalized | str contains "bitbucket.org") { "bitbucket" } else if ($normalized | str contains "codeberg.org") { "codeberg" } else if ($normalized | str contains "gitea") { "gitea" } else if ($normalized | str contains "dev.azure.com") or ($normalized | str contains "visualstudio.com") { "azure_devops" } else { "" }
 }
 
+def cailoxo-clean-git-url [remote_url: string] {
+  let url = ($remote_url | str trim | str replace --regex '\.git/?$' '' | str replace --regex '/$' '')
+  if $url == "" { return "" }
+  if ($url | str starts-with "http://") or ($url | str starts-with "https://") { return $url }
+
+  if ($url | str starts-with "git@ssh.dev.azure.com:v3/") {
+    let path = ($url | str replace "git@ssh.dev.azure.com:v3/" "")
+    let parts = ($path | split row "/")
+    if (($parts | length) >= 3) {
+      let org = ($parts | get 0)
+      let project = ($parts | get 1)
+      let repo = ($parts | get 2)
+      return $"https://dev.azure.com/($org)/($project)/_git/($repo)"
+    }
+  }
+
+  if $url =~ '^[A-Za-z][A-Za-z0-9+.-]*://' {
+    mut rest = ($url | str replace --regex '^[A-Za-z][A-Za-z0-9+.-]*://' '')
+    if ($rest | str contains "@") { $rest = ($rest | split row "@" | last) }
+    let parts = ($rest | split row "/")
+    if (($parts | length) < 2) { return "" }
+    let host = (($parts | first) | split row ":" | first)
+    let path = ($parts | skip 1 | str join "/")
+    if $host == "ssh.dev.azure.com" and ($path | str starts-with "v3/") {
+      let azure = ($path | split row "/")
+      if (($azure | length) >= 4) {
+        let org = ($azure | get 1)
+        let project = ($azure | get 2)
+        let repo = ($azure | get 3)
+        return $"https://dev.azure.com/($org)/($project)/_git/($repo)"
+      }
+    }
+    if $host != "" and $path != "" { return $"https://($host)/($path)" }
+    return ""
+  }
+
+  if ($url | str contains "@") and ($url | str contains ":") {
+    let rest = ($url | split row "@" | last)
+    let parts = ($rest | split row ":")
+    if (($parts | length) >= 2) {
+      let host = ($parts | first)
+      let path = ($parts | skip 1 | str join ":")
+      if $host != "" and $path != "" { return $"https://($host)/($path)" }
+    }
+  }
+
+  if $url =~ '^[A-Za-z0-9.-]+:.+' {
+    let parts = ($url | split row ":")
+    let host = ($parts | first)
+    let path = ($parts | skip 1 | str join ":")
+    if $host != "" and $path != "" { return $"https://($host)/($path)" }
+  }
+
+  ""
+}
+
 def cailoxo-remote-name [branch: string] {
   let remote = (git config --get $"branch.($branch).remote" | complete)
   if $remote.exit_code == 0 and ($remote.stdout | str trim) != "" { $remote.stdout | str trim } else { "origin" }
@@ -703,13 +834,13 @@ def cailoxo-start-fetch [branch: string] {
 }
 
 def cailoxo-upstream-info [branch: string] {
-  if not $CAILOXO_FETCH_UPSTREAM_ICON { return {upstream: "", upstream_icon: "", upstream_url: ""} }
+  if (not $CAILOXO_FETCH_UPSTREAM_ICON) and (not $CAILOXO_GIT_URL) { return {upstream: "", upstream_icon: "", upstream_url: ""} }
   let remote_name = (cailoxo-remote-name $branch)
   let url_out = (git config --get $"remote.($remote_name).url" | complete)
   let upstream_url = if $url_out.exit_code == 0 { $url_out.stdout | str trim } else { "" }
   let upstream = (cailoxo-upstream-provider $upstream_url)
-  let upstream_icon = if $upstream != "" and ($upstream in ($CAILOXO_UPSTREAM_ICONS | columns)) { $CAILOXO_UPSTREAM_ICONS | get $upstream } else { "" }
-  {upstream: $upstream, upstream_icon: $upstream_icon, upstream_url: $upstream_url}
+  let upstream_icon = __CAILOXO_UPSTREAM_ICON_EXPR__
+  {upstream: $upstream, upstream_icon: $upstream_icon, upstream_url: (cailoxo-clean-git-url $upstream_url)}
 }
 
 def cailoxo-apply-template [template: string, vars: record] {
@@ -754,6 +885,66 @@ def cailoxo-format-part [value: string, format: string] {
   if $format == "" { return $value }
   if ($format | str contains "%s") { return ($format | str replace --all "%s" $value) }
   $value
+}
+
+def cailoxo-url-escape [value: string] {
+  $value
+  | str replace --all '\\' '/'
+  | str replace --all '%' '%25'
+  | str replace --all ' ' '%20'
+  | str replace --all '#' '%23'
+  | str replace --all '?' '%3F'
+  | str replace --all ';' '%3B'
+}
+
+def cailoxo-host-name [] {
+  let computer = ($env.COMPUTERNAME? | default "")
+  if $computer != "" { return $computer }
+  let hostname_env = ($env.HOSTNAME? | default "")
+  if $hostname_env != "" { return $hostname_env }
+  let hostname_out = (hostname | complete)
+  if $hostname_out.exit_code == 0 { $hostname_out.stdout | str trim } else { "" }
+}
+
+def cailoxo-wsl-distro [] {
+  let release = "/proc/sys/kernel/osrelease"
+  if not ($release | path exists) { return "" }
+  let text = (open --raw $release | str downcase)
+  if not ($text | str contains "microsoft") { return "" }
+  $env.WSL_DISTRO_NAME? | default ""
+}
+
+def cailoxo-file-url [] {
+  let path = (cailoxo-url-escape (pwd | path expand))
+  if $path =~ '^[A-Za-z]:/' { return $"file:///($path)" }
+  let distro = (cailoxo-wsl-distro)
+  if $distro != "" { return $"file://wsl.localhost/(cailoxo-url-escape $distro)($path)" }
+  $"file://(cailoxo-host-name)($path)"
+}
+
+def cailoxo-osc7 [] {
+  if not $CAILOXO_OSC7 { return "" }
+  "\u{1b}]7;" + (cailoxo-file-url) + "\u{1b}\\"
+}
+
+def cailoxo-path-url-start [] {
+  if not $CAILOXO_PATH_URL { return "" }
+  "\u{1b}]8;;" + (cailoxo-file-url) + "\u{1b}\\"
+}
+
+def cailoxo-path-url-end [] {
+  if not $CAILOXO_PATH_URL { return "" }
+  "\u{1b}]8;;\u{1b}\\"
+}
+
+def cailoxo-git-url-start [url: string] {
+  if (not $CAILOXO_GIT_URL) or $url == "" { return "" }
+  "\u{1b}]8;;" + $url + "\u{1b}\\"
+}
+
+def cailoxo-git-url-end [url: string] {
+  if (not $CAILOXO_GIT_URL) or $url == "" { return "" }
+  "\u{1b}]8;;\u{1b}\\"
 }
 
 def cailoxo-git-root-name [] {
@@ -991,9 +1182,9 @@ def cailoxo-render-main [] {
   let git_style = if $git.dirty { $CAILOXO_GIT_DIRTY_STYLE } else { $CAILOXO_GIT_CLEAN_STYLE }
   let path_sep = if $git_text == "" { $CAILOXO_PATH_SEP_LAST } else if $git.dirty { $CAILOXO_PATH_SEP_DIRTY } else { $CAILOXO_PATH_SEP_CLEAN }
   let git_sep = if $git.dirty { $CAILOXO_GIT_SEP_DIRTY } else { $CAILOXO_GIT_SEP_CLEAN }
-  let first = ($CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL
-    + $CAILOXO_PATH_STYLE + (cailoxo-style-template $path_text) + $CAILOXO_RESET + $path_sep
-    + (if $git_text == "" { "" } else { $git_style + (cailoxo-style-template $git_text) + $CAILOXO_RESET + $git_sep }))
+  let first = ((cailoxo-osc7) + $CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL
+    + $CAILOXO_PATH_STYLE + (cailoxo-path-url-start) + (cailoxo-style-template $path_text) + (cailoxo-path-url-end) + $CAILOXO_RESET + $path_sep
+    + (if $git_text == "" { "" } else { $git_style + (cailoxo-git-url-start $git.upstream_url) + (cailoxo-style-template $git_text) + (cailoxo-git-url-end $git.upstream_url) + $CAILOXO_RESET + $git_sep }))
   $first + "\n"
 }
 
@@ -1022,6 +1213,14 @@ $env.PROMPT_MULTILINE_INDICATOR = ""
     out.push_str(
         &body
             .replace("__CAILOXO_OS_ICON_CONDITIONS__", &os_icon_conditions)
+            .replace(
+                "__CAILOXO_UPSTREAM_ICON_EXPR__",
+                if features.git_upstream_icon {
+                    "if $upstream != \"\" and ($upstream in ($CAILOXO_UPSTREAM_ICONS | columns)) { $CAILOXO_UPSTREAM_ICONS | get $upstream } else { \"\" }"
+                } else {
+                    "\"\""
+                },
+            )
             .replace("__CAILOXO_STYLE_REPLACEMENTS__", &style_replacements)
             .replace("__CAILOXO_PLAIN_REPLACEMENTS__", &plain_replacements),
     );
@@ -1071,6 +1270,9 @@ mod tests {
         assert!(script.contains("def cailoxo-style-template"));
         assert!(script.contains("def cailoxo-format-path"));
         assert!(script.contains("def cailoxo-start-fetch"));
+        assert!(script.contains("def cailoxo-path-url-start"));
+        assert!(script.contains("def cailoxo-git-url-start"));
+        assert!(script.contains("const CAILOXO_OSC7 = true"));
         assert!(script.contains("def cailoxo-git-action []"));
         assert!(script.contains("action: \"{{ action }}\""));
         assert!(script.contains("for name in [behind ahead stashed action conflicted"));
@@ -1090,6 +1292,7 @@ mod tests {
         let config = Config::parse(NO_GIT_CONFIG).unwrap();
         let script = generate(&config).unwrap();
         assert!(!script.contains("cailoxo-git-info"));
+        assert!(script.contains("def cailoxo-path-url-start"));
         assert!(!script.contains("git status"));
         assert!(!script.contains("git rev-parse"));
         assert!(!script.contains("cailoxo-start-fetch"));
@@ -1110,6 +1313,15 @@ mod tests {
         let config = Config::parse(BRANCH_ONLY_GIT_CONFIG).unwrap();
         let script = generate(&config).unwrap();
         assert!(!script.contains("const CAILOXO_UPSTREAM_ICONS"));
+    }
+
+    #[test]
+    fn nu_git_url_without_upstream_icon_omits_icon_map_reference() {
+        let config = Config::parse(GIT_URL_ONLY_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(script.contains("const CAILOXO_GIT_URL = true"));
+        assert!(!script.contains("const CAILOXO_UPSTREAM_ICONS"));
+        assert!(script.contains("let upstream_icon = \"\""));
     }
 
     const NO_GIT_CONFIG: &str = r#"
@@ -1161,6 +1373,37 @@ separator = ">"
 
 [line.span.settings]
 fetch_upstream_icon = true
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
+
+    const GIT_URL_ONLY_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line.span]]
+type = "git"
+template = " {{ branch }} "
+background = "2"
+separator = ">"
+
+[line.span.settings]
+url = true
 
 [[line]]
 [[line.span]]

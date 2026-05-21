@@ -26,12 +26,14 @@ Supported:
 - adaptive two-line prompt
 - transient prompt through prompt environment variables
 - async remote fetch picked up on next prompt render
+- OSC8 path and Git links
+- OSC7 current-directory metadata
 - Windows path display separators
 
 Limitations:
 
 - Reedline does not re-run `PROMPT_COMMAND` for resize while input is active.
-- Reedline does not expose OSC8 links from prompt strings reliably, so generated Nu prompts ignore path/Git `url` settings and path `osc7`.
+- OSC8 and OSC7 support depends on the terminal emulator.
 - Fetch completion does not repaint current prompt; next prompt render picks up fetched refs.
 
 ## PowerShell
@@ -61,6 +63,6 @@ Notes:
 | Fetch repaint | yes | next prompt | yes |
 | Transient prompt | yes | yes | yes |
 | Resize repaint | yes | limited | shell-dependent |
-| Path OSC8 link | yes | no | yes |
-| Git OSC8 link | yes | no | yes |
-| OSC7 CWD metadata | yes | no | yes |
+| Path OSC8 link | yes | yes | yes |
+| Git OSC8 link | yes | yes | yes |
+| OSC7 CWD metadata | yes | yes | yes |

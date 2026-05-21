@@ -41,14 +41,14 @@ template = " {{ upstream_icon }}{{ branch_icon }}{{ branch }}{{ if status }} {{ 
 
 ## Path Or Git Links Do Not Work
 
-Links require terminal OSC8 support. zsh and PowerShell generated scripts emit OSC8 links when enabled:
+Links require terminal OSC8 support. Generated scripts emit OSC8 links when enabled:
 
 ```toml
 [line.span.settings]
 url = true
 ```
 
-Nushell/Reedline does not expose OSC8 links from prompt strings reliably, so generated Nu prompts ignore `url` settings.
+If links do not appear in Nushell, check terminal OSC8 support first. Modern Windows Terminal supports prompt OSC8 links.
 
 ## Nu Command Output Disappears After Transient Prompt
 

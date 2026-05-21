@@ -89,7 +89,7 @@ Available when `type = "git"`:
 | `status` | Rendered Git status string |
 | `upstream` | Upstream provider name, such as `github`, `gitlab`, or `azure_devops` |
 | `upstream_icon` | Upstream provider icon selected from `defaults/icons.toml` |
-| `upstream_url` | Remote URL from local Git config; zsh/pwsh clean it to browser URL when Git `url = true` |
+| `upstream_url` | Remote URL from local Git config; cleaned to browser URL when Git `url = true` |
 
 Example:
 
