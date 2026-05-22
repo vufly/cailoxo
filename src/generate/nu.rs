@@ -728,6 +728,7 @@ fn write_body(
     features: &Features,
 ) -> Result<()> {
     let templates = nu_status_templates(git)?;
+    let use_gstat = git.setting_bool("nu_gstat").unwrap_or(false);
     let os_icon_conditions = nu_os_icon_conditions()?;
     let style_replacements = nu_style_replacements(features);
     let plain_replacements = nu_plain_replacements(features);
@@ -1053,7 +1054,98 @@ def cailoxo-status-item [name: string, count: int, action: string] {
   $template | str replace --all "{{ count }}" ($count | into string)
 }
 
-def cailoxo-git-path [name: string] {
+__CAILOXO_GIT_INFO_RUNTIME__
+
+def cailoxo-render-main [] {
+  let os_icon = (cailoxo-os-icon)
+  let git = (cailoxo-git-info)
+  let git_root = (cailoxo-git-root-name)
+  let git_vars = {status: $git.status, branch_icon: $CAILOXO_BRANCH_ICON, upstream_icon: $git.upstream_icon, upstream: $git.upstream, upstream_url: $git.upstream_url, branch: $git.branch}
+  let git_text = if $git.branch == "" { "" } else { cailoxo-apply-template $CAILOXO_GIT_TEMPLATE $git_vars }
+  let os_text = (cailoxo-apply-template $CAILOXO_OS_TEMPLATE {icon: $os_icon})
+
+  let term_width = ((term size).columns | default 80)
+  let fixed = (((cailoxo-plain-template $os_text) | str length --chars) + ((cailoxo-plain-template $git_text) | str length --chars) + ($CAILOXO_HOME_ICON | str length --chars) + ($CAILOXO_FOLDER_ICON | str length --chars) + 10)
+  let budget = [1, ($term_width - $fixed)] | math max
+  let path = (cailoxo-format-path (cailoxo-shorten-path $budget) $git_root)
+  let is_home = ((pwd | path expand) == ($nu.home-dir | path expand))
+  let path_vars = {path: $path, home: $is_home, home_icon: $CAILOXO_HOME_ICON, folder_icon: $CAILOXO_FOLDER_ICON}
+  let path_text = (cailoxo-path-template $path_vars)
+
+  let git_style = if $git.dirty { $CAILOXO_GIT_DIRTY_STYLE } else { $CAILOXO_GIT_CLEAN_STYLE }
+  let path_sep = if $git_text == "" { $CAILOXO_PATH_SEP_LAST } else if $git.dirty { $CAILOXO_PATH_SEP_DIRTY } else { $CAILOXO_PATH_SEP_CLEAN }
+  let git_sep = if $git.dirty { $CAILOXO_GIT_SEP_DIRTY } else { $CAILOXO_GIT_SEP_CLEAN }
+  let first = ((cailoxo-osc7) + $CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL
+    + $CAILOXO_PATH_STYLE + (cailoxo-path-url-start) + (cailoxo-style-template $path_text) + (cailoxo-path-url-end) + $CAILOXO_RESET + $path_sep
+    + (if $git_text == "" { "" } else { $git_style + (cailoxo-git-url-start $git.upstream_url) + (cailoxo-style-template $git_text) + (cailoxo-git-url-end $git.upstream_url) + $CAILOXO_RESET + $git_sep }))
+  $first + "\n"
+}
+
+def cailoxo-render-indicator [] {
+  let prompt_style = if (($env.LAST_EXIT_CODE? | default 0) == 0) { $CAILOXO_PROMPT_OK_STYLE } else { $CAILOXO_PROMPT_ERROR_STYLE }
+  let suffix = if $CAILOXO_FINAL_SPACE { " " } else { "" }
+  $prompt_style + (cailoxo-style-template $CAILOXO_PROMPT_TEMPLATE) + $CAILOXO_RESET + $suffix
+}
+
+def cailoxo-render-full [] {
+  (cailoxo-render-main) + (cailoxo-render-indicator)
+}
+
+def cailoxo-render-transient [] {
+  let prompt_style = if (($env.LAST_EXIT_CODE? | default 0) == 0) { $CAILOXO_TRANSIENT_OK_STYLE } else { $CAILOXO_TRANSIENT_ERROR_STYLE }
+  $prompt_style + (cailoxo-style-template $CAILOXO_TRANSIENT_TEMPLATE) + $CAILOXO_RESET
+}
+
+$env.PROMPT_COMMAND = {|| cailoxo-render-main }
+$env.PROMPT_INDICATOR = {|| cailoxo-render-indicator }
+$env.PROMPT_COMMAND_RIGHT = ""
+$env.PROMPT_INDICATOR_VI_INSERT = ""
+$env.PROMPT_INDICATOR_VI_NORMAL = ""
+$env.PROMPT_MULTILINE_INDICATOR = ""
+"#;
+    let git_info_runtime = if use_gstat {
+        r#"def cailoxo-gstat-action [state: string] {
+  if $state == "" or $state == "clean" or $state == "no_state" { return "" }
+  if ($state | str contains "rebase_interactive") { return "rebase-i" }
+  if ($state | str contains "rebase_merge") { return "rebase-m" }
+  if ($state | str contains "rebase") { return "rebase" }
+  if ($state | str contains "apply_mailbox_or_rebase") { return "am/rebase" }
+  if ($state | str contains "apply_mailbox") { return "am" }
+  if ($state | str contains "cherrypick") { return "cherry" }
+  if ($state | str contains "revert") { return "revert" }
+  if ($state | str contains "bisect") { return "bisect" }
+  if ($state | str contains "merge") { return "merge" }
+  $state
+}
+
+def cailoxo-git-info [] {
+  if (which gstat | is-empty) { return {branch: "", status: "", dirty: false, upstream: "", upstream_icon: "", upstream_url: ""} }
+  let stat = (try { gstat --no-tag } catch { null })
+  if $stat == null or ($stat.repo_name? | default "no_repository") == "no_repository" { return {branch: "", status: "", dirty: false, upstream: "", upstream_icon: "", upstream_url: ""} }
+  let branch = ($stat.branch? | default "")
+  if $branch == "" or $branch == "no_branch" { return {branch: "", status: "", dirty: false, upstream: "", upstream_icon: "", upstream_url: ""} }
+  let upstream = (cailoxo-upstream-info $branch)
+  cailoxo-start-fetch $branch
+  if not $CAILOXO_GIT_STATUS { return {branch: $branch, status: "", dirty: false, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url} }
+
+  let staged = (($stat.idx_added_staged? | default 0) + ($stat.idx_modified_staged? | default 0) + ($stat.idx_deleted_staged? | default 0) + ($stat.idx_renamed? | default 0) + ($stat.idx_type_changed? | default 0))
+  let modified = (($stat.wt_modified? | default 0) + ($stat.wt_type_changed? | default 0))
+  let renamed = (($stat.idx_renamed? | default 0) + ($stat.wt_renamed? | default 0))
+  let deleted = (($stat.idx_deleted_staged? | default 0) + ($stat.wt_deleted? | default 0))
+  let counts = {ahead: ($stat.ahead? | default 0), behind: ($stat.behind? | default 0), action: 0, conflicted: ($stat.conflicts? | default 0), untracked: ($stat.wt_untracked? | default 0), modified: $modified, staged: $staged, renamed: $renamed, deleted: $deleted, stashed: ($stat.stashes? | default 0)}
+  let action = (cailoxo-gstat-action ($stat.state? | default ""))
+  let dirty = (($counts.conflicted + $counts.untracked + $counts.modified + $counts.staged + $counts.renamed + $counts.deleted) > 0)
+
+  mut items = []
+  for name in [behind ahead stashed action conflicted staged modified untracked renamed deleted] {
+    let item = (cailoxo-status-item $name ($counts | get $name) $action)
+    if $item != "" { $items = ($items | append $item) }
+  }
+  {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: $dirty, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
+}
+"#
+    } else {
+        r#"def cailoxo-git-path [name: string] {
   let out = (git rev-parse --git-path $name | complete)
   if $out.exit_code == 0 { $out.stdout | str trim } else { "" }
 }
@@ -1162,54 +1254,9 @@ def cailoxo-git-info [] {
   }
   {branch: $branch, status: ($items | str join $CAILOXO_STATUS_SEPARATOR), dirty: $dirty, upstream: $upstream.upstream, upstream_icon: $upstream.upstream_icon, upstream_url: $upstream.upstream_url}
 }
-
-def cailoxo-render-main [] {
-  let os_icon = (cailoxo-os-icon)
-  let git = (cailoxo-git-info)
-  let git_root = (cailoxo-git-root-name)
-  let git_vars = {status: $git.status, branch_icon: $CAILOXO_BRANCH_ICON, upstream_icon: $git.upstream_icon, upstream: $git.upstream, upstream_url: $git.upstream_url, branch: $git.branch}
-  let git_text = if $git.branch == "" { "" } else { cailoxo-apply-template $CAILOXO_GIT_TEMPLATE $git_vars }
-  let os_text = (cailoxo-apply-template $CAILOXO_OS_TEMPLATE {icon: $os_icon})
-
-  let term_width = ((term size).columns | default 80)
-  let fixed = (((cailoxo-plain-template $os_text) | str length --chars) + ((cailoxo-plain-template $git_text) | str length --chars) + ($CAILOXO_HOME_ICON | str length --chars) + ($CAILOXO_FOLDER_ICON | str length --chars) + 10)
-  let budget = [1, ($term_width - $fixed)] | math max
-  let path = (cailoxo-format-path (cailoxo-shorten-path $budget) $git_root)
-  let is_home = ((pwd | path expand) == ($nu.home-dir | path expand))
-  let path_vars = {path: $path, home: $is_home, home_icon: $CAILOXO_HOME_ICON, folder_icon: $CAILOXO_FOLDER_ICON}
-  let path_text = (cailoxo-path-template $path_vars)
-
-  let git_style = if $git.dirty { $CAILOXO_GIT_DIRTY_STYLE } else { $CAILOXO_GIT_CLEAN_STYLE }
-  let path_sep = if $git_text == "" { $CAILOXO_PATH_SEP_LAST } else if $git.dirty { $CAILOXO_PATH_SEP_DIRTY } else { $CAILOXO_PATH_SEP_CLEAN }
-  let git_sep = if $git.dirty { $CAILOXO_GIT_SEP_DIRTY } else { $CAILOXO_GIT_SEP_CLEAN }
-  let first = ((cailoxo-osc7) + $CAILOXO_OS_STYLE + (cailoxo-style-template $os_text) + $CAILOXO_RESET + $CAILOXO_OS_TAIL
-    + $CAILOXO_PATH_STYLE + (cailoxo-path-url-start) + (cailoxo-style-template $path_text) + (cailoxo-path-url-end) + $CAILOXO_RESET + $path_sep
-    + (if $git_text == "" { "" } else { $git_style + (cailoxo-git-url-start $git.upstream_url) + (cailoxo-style-template $git_text) + (cailoxo-git-url-end $git.upstream_url) + $CAILOXO_RESET + $git_sep }))
-  $first + "\n"
-}
-
-def cailoxo-render-indicator [] {
-  let prompt_style = if (($env.LAST_EXIT_CODE? | default 0) == 0) { $CAILOXO_PROMPT_OK_STYLE } else { $CAILOXO_PROMPT_ERROR_STYLE }
-  let suffix = if $CAILOXO_FINAL_SPACE { " " } else { "" }
-  $prompt_style + (cailoxo-style-template $CAILOXO_PROMPT_TEMPLATE) + $CAILOXO_RESET + $suffix
-}
-
-def cailoxo-render-full [] {
-  (cailoxo-render-main) + (cailoxo-render-indicator)
-}
-
-def cailoxo-render-transient [] {
-  let prompt_style = if (($env.LAST_EXIT_CODE? | default 0) == 0) { $CAILOXO_TRANSIENT_OK_STYLE } else { $CAILOXO_TRANSIENT_ERROR_STYLE }
-  $prompt_style + (cailoxo-style-template $CAILOXO_TRANSIENT_TEMPLATE) + $CAILOXO_RESET
-}
-
-$env.PROMPT_COMMAND = {|| cailoxo-render-main }
-$env.PROMPT_INDICATOR = {|| cailoxo-render-indicator }
-$env.PROMPT_COMMAND_RIGHT = ""
-$env.PROMPT_INDICATOR_VI_INSERT = ""
-$env.PROMPT_INDICATOR_VI_NORMAL = ""
-$env.PROMPT_MULTILINE_INDICATOR = ""
-"#;
+"#
+    };
+    let body = body.replace("__CAILOXO_GIT_INFO_RUNTIME__", git_info_runtime);
     out.push_str(
         &body
             .replace("__CAILOXO_OS_ICON_CONDITIONS__", &os_icon_conditions)
@@ -1324,6 +1371,18 @@ mod tests {
         assert!(script.contains("let upstream_icon = \"\""));
     }
 
+    #[test]
+    fn nu_gstat_uses_plugin_status_without_shell_status() {
+        let config = Config::parse(GSTAT_GIT_CONFIG).unwrap();
+        let script = generate(&config).unwrap();
+        assert!(script.contains("gstat --no-tag"));
+        assert!(script.contains("which gstat"));
+        assert!(!script.contains("git status --porcelain"));
+        assert!(!script.contains("git rev-list --count"));
+        assert!(!script.contains("git stash list"));
+        assert!(!script.contains("def cailoxo-git-action []"));
+    }
+
     const NO_GIT_CONFIG: &str = r#"
 version = 1
 final_space = true
@@ -1404,6 +1463,38 @@ separator = ">"
 
 [line.span.settings]
 url = true
+
+[[line]]
+[[line.span]]
+type = "text"
+template = ">"
+"#;
+
+    const GSTAT_GIT_CONFIG: &str = r#"
+version = 1
+
+[[line]]
+[[line.span]]
+type = "os"
+template = " {{ icon }} "
+background = "7"
+tail = ">"
+
+[[line.span]]
+type = "path"
+template = " {{ path }} "
+background = "4"
+separator = ">"
+
+[[line.span]]
+type = "git"
+template = " {{ branch }}{{ if status }} {{ status }}{{ end }} "
+background = "2"
+separator = ">"
+
+[line.span.settings]
+fetch_status = true
+nu_gstat = true
 
 [[line]]
 [[line.span]]

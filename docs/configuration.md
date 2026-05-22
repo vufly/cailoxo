@@ -172,12 +172,15 @@ fetch_remote_timeout_ms = 5000
 fetch_upstream_icon = false
 show_branch_status = false
 show_stash_count = true
+nu_gstat = false
 icon_set = "minimal"
 separator = " |"
 url = true
 ```
 
 Ahead and behind counts use existing local upstream refs. With `fetch_remote = true`, the prompt still renders immediately from local refs, then starts a throttled background `git fetch --quiet --no-tags <remote>`.
+
+`nu_gstat = true` makes the generated Nushell prompt use the `gstat --no-tag` plugin for local Git status instead of emitting the shell `git status`/`rev-list`/`stash` status logic. The generated script guards `gstat` availability and hides the Git span if the plugin is missing or fails to load.
 
 Refresh behavior differs by shell:
 

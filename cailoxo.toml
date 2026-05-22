@@ -52,7 +52,7 @@ separator = ""
 invert_separator = false
 
 [line.span.settings]
-source = "cli"
+nu_gstat = false
 fetch_status = true
 fetch_remote = true
 fetch_remote_interval_ms = 60000

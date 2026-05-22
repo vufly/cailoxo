@@ -31,6 +31,8 @@ Fetch behavior differs by shell:
 - `pwsh`: attempts repaint when fetched refs change.
 - `nu`: updates on next prompt render.
 
+If `nu_gstat = true`, Nushell uses the `gstat --no-tag` plugin for local status. If the Git span disappears, run `which gstat` and `gstat --no-tag`; missing plugin libraries such as `libssl.so.3` must be fixed outside cailoxo.
+
 ## Clean Git Repo Has Extra Space
 
 Use conditional status spacing in Git template:

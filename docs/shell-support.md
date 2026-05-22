@@ -26,6 +26,7 @@ Supported:
 - adaptive two-line prompt
 - transient prompt through prompt environment variables
 - async remote fetch picked up on next prompt render
+- optional `gstat --no-tag` plugin backend for local Git status
 - OSC8 path and Git links
 - OSC7 current-directory metadata
 - Windows path display separators
