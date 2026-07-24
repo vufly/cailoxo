@@ -267,7 +267,7 @@ fn generate_no_git(config: &Config) -> Result<String> {
 
     let body = r#"
 def cailoxo-os-icon [] {
-  let os = (sys host | get name | str downcase)
+  let os = (sys host | get name | str lowercase)
   __CAILOXO_OS_ICON_CONDITIONS__
 }
 
@@ -311,7 +311,7 @@ def cailoxo-host-name [] {
 def cailoxo-wsl-distro [] {
   let release = "/proc/sys/kernel/osrelease"
   if not ($release | path exists) { return "" }
-  let text = (open --raw $release | str downcase)
+  let text = (open --raw $release | str lowercase)
   if not ($text | str contains "microsoft") { return "" }
   $env.WSL_DISTRO_NAME? | default ""
 }
@@ -340,7 +340,7 @@ def cailoxo-path-url-end [] {
 }
 
 def cailoxo-normalize-path [path: string] { $path | str replace --all '\\' '/' }
-def cailoxo-path-separator [] { let os = (sys host | get name | str downcase); if ($os | str contains "windows") { '\\' } else { '/' } }
+def cailoxo-path-separator [] { let os = (sys host | get name | str lowercase); if ($os | str contains "windows") { '\\' } else { '/' } }
 __CAILOXO_GIT_ROOT_FUNCTION__
 
 def cailoxo-format-path [path: string, git_root: string] {
@@ -739,12 +739,12 @@ fn write_body(
     }
     let body = r#"
 def cailoxo-os-icon [] {
-  let os = (sys host | get name | str downcase)
+  let os = (sys host | get name | str lowercase)
   __CAILOXO_OS_ICON_CONDITIONS__
 }
 
 def cailoxo-upstream-provider [url: string] {
-  let normalized = ($url | str downcase)
+  let normalized = ($url | str lowercase)
   if ($normalized | str contains "github.com") { "github" } else if ($normalized | str contains "gitlab.com") { "gitlab" } else if ($normalized | str contains "bitbucket.org") { "bitbucket" } else if ($normalized | str contains "codeberg.org") { "codeberg" } else if ($normalized | str contains "gitea") { "gitea" } else if ($normalized | str contains "dev.azure.com") or ($normalized | str contains "visualstudio.com") { "azure_devops" } else { "" }
 }
 
@@ -910,7 +910,7 @@ def cailoxo-host-name [] {
 def cailoxo-wsl-distro [] {
   let release = "/proc/sys/kernel/osrelease"
   if not ($release | path exists) { return "" }
-  let text = (open --raw $release | str downcase)
+  let text = (open --raw $release | str lowercase)
   if not ($text | str contains "microsoft") { return "" }
   $env.WSL_DISTRO_NAME? | default ""
 }
@@ -958,7 +958,7 @@ def cailoxo-normalize-path [path: string] {
 }
 
 def cailoxo-path-separator [] {
-  let os = (sys host | get name | str downcase)
+  let os = (sys host | get name | str lowercase)
   if ($os | str contains "windows") { '\' } else { '/' }
 }
 
